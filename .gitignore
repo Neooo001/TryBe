@@ -44,3 +44,6 @@ __pycache__/
 .env
 config.local.properties
 *.secret
+
+# 部署文件（nginx、tomcat等）
+hmall-nginx/

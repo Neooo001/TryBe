@@ -1,0 +1,46 @@
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE 编辑器配置
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+*.classpath
+.c9/
+*.swp
+*~
+
+# 日志文件
+*.log
+logs/
+log/
+
+# 缓存、临时文件
+tmp/
+temp/
+*.tmp
+*.bak
+.cache/
+
+# 打包产物、编译输出（重点！不提交编译后的文件）
+dist/
+build/
+out/
+target/
+*.jar
+*.exe
+*.dll
+
+# 依赖文件夹（node、maven等第三方包不提交）
+node_modules/
+venv/
+env/
+__pycache__/
+
+# 隐私配置（密码、本地环境变量）
+.env
+config.local.properties
+*.secret

@@ -1,0 +1,5 @@
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+  com.trybe.common.config.MyBatisConfig,\
+  com.trybe.common.config.MvcConfig,\
+  com.trybe.common.config.MqConfig,\
+  com.trybe.common.config.JsonConfig

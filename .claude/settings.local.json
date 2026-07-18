@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mvn compile *)",
+      "Bash(mv \"TryBe-api/src/main/java/com/hmall\" \"TryBe-api/src/main/java/com/trybe\")",
+      "Bash(mv \"TryBe-common/src/main/java/com/hmall\" \"TryBe-common/src/main/java/com/trybe\")",
+      "Bash(mv \"TryBe-gateway/src/main/java/com/hmall\" \"TryBe-gateway/src/main/java/com/trybe\")",
+      "Bash(mv \"user-service/src/main/java/com/hmall\" \"user-service/src/main/java/com/trybe\")",
+      "Bash(ls -d TryBe-api/src/main/java/com/trybe/* TryBe-common/src/main/java/com/trybe/* TryBe-gateway/src/main/java/com/trybe/* user-service/src/main/java/com/trybe/*)",
+      "Bash(cd \"D:\\\\Idea\\\\JavaProject\\\\TryBe\" && sed -i \"s/com\\\\.hmall/com.trybe/g\" .idea/workspace.xml && echo \"workspace.xml updated\")",
+      "Bash(xargs -I {} basename {})",
+      "Bash(javap -c -p -verbose user-service/target/classes/com/trybe/user/UserApplication.class)",
+      "Bash(cd \"D:\\\\Idea\\\\JavaProject\\\\TryBe\" && echo \"=== 检查 jars 依赖中 com.hmall 的引用 ===\" && find . -name \"*.jar\" -path \"*/repository/*\" 2>/dev/null | head -5 && echo \"=== 检查是否有 Maven 本地仓库中的 TryBe jar ===\" && find ~/.m2/repository/com -name \"TryBe*\" -o -name \"trybe*\" 2>/dev/null | head -10 && echo \"DONE\" && echo \"=== 查找完整的 trybe 目录结构 ===\" && find user-service/src -type f | sort)",
+      "Bash(mvn clean *)",
+      "Bash(where mvn *)",
+      "Read(//c/Users/dell0/**)",
+      "Bash(\"/c/Users/dell0/.m2/wrapper/dists/apache-maven-3.9.16-bin/5grr65jo27hi51sujmtcldfovl/apache-maven-3.9.16/bin/mvn\" clean *)",
+      "Bash(\"/c/Users/dell0/.m2/wrapper/dists/apache-maven-3.9.16-bin/5grr65jo27hi51sujmtcldfovl/apache-maven-3.9.16/bin/mvn\" compile *)"
+    ]
+  }
+}

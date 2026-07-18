@@ -1,0 +1,18 @@
+server:
+  port: 8084
+spring:
+  application:
+    name: user-service
+  profiles:
+    active: dev
+  config:
+    import:
+      nacos:
+hm:
+  jwt:
+    location: classpath:TryBe.jks
+    alias: TryBe
+    password: 123456
+    tokenTTL: 30m
+
+# keytool -genkeypair -alias TryBe -keyalg RSA -keypass 123456 -keystore trybe.jks -storepass 123456

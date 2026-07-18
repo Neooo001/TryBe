@@ -17,6 +17,11 @@ import reactor.core.publisher.Mono;
 
 import java.util.List;
 
+
+/*
+*
+* 登录校验过滤器
+* */
 @Component
 @RequiredArgsConstructor
 public class AuthGlobalFilter implements GlobalFilter, Ordered {

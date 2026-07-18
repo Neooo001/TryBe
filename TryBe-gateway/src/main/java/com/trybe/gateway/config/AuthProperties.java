@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 
+// 网关的认证白名单 ，不需要认证的接口
 @Data
 @Component
 @ConfigurationProperties(prefix = "hm.auth")

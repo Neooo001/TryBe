@@ -8,7 +8,10 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
-
+/*
+* 测试自定义全局过滤器
+* @component
+* */
 public class MyGlobalFilter implements GlobalFilter, Ordered {
 
     @Override

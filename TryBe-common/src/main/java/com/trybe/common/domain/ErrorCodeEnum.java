@@ -57,6 +57,18 @@ public enum ErrorCodeEnum {
     /** 账号已被冻结 */
     ACCOUNT_FROZEN(304, "账号异常，请联系客服"),
 
+    // ======================== 401xx 双Token鉴权专用（5位码） ========================
+    /**
+     * AccessToken 合法过期 — 前端收到后自动用 RefreshToken 刷新，用户无感知
+     * <p>与 302 的区别：302 是旧单Token体系的过期码，40101 用于双Token体系下告诉前端"拿 RefreshToken 来换新的"</p>
+     */
+    ACCESS_TOKEN_EXPIRE(40101, "AccessToken已过期"),
+    /**
+     * AccessToken 签名非法 / 被篡改 / RefreshToken 过期或无效 / 会话已注销
+     * <p>前端收到后清除全部 Token，弹窗引导重新微信登录</p>
+     */
+    TOKEN_INVALID_RELOGIN(40102, "登录凭证无效，请重新登录"),
+
     // ======================== 4xx 业务逻辑错误 ========================
     /** 通用业务逻辑错误 */
     BIZ_ERROR(400, "业务处理失败"),

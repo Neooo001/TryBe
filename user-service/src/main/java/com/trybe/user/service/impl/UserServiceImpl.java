@@ -14,11 +14,13 @@ import com.trybe.user.service.AvatarUrlService;
 import com.trybe.user.service.IUserService;
 import com.trybe.user.service.WechatService;
 import com.trybe.user.util.JwtTool;
+import com.trybe.user.util.RefreshTokenUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 
 @Slf4j
@@ -30,6 +32,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     private final JwtTool jwtTool;
     private final JwtProperties jwtProperties;
     private final AvatarUrlService avatarUrlService;
+    private final RefreshTokenUtil refreshTokenUtil;
 
     @Override
     @Transactional
@@ -45,10 +48,22 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             user.setStatus(UserStatus.NORMAL);
             save(user);
         }
-        String token = jwtTool.createToken(user.getId(), jwtProperties.getTokenTTL());
-        log.info("token: {}", token);
+
+        // 生成双Token
+        Duration accessTtl = jwtProperties.getAccessTokenTTL();
+        String accessToken = jwtTool.createToken(user.getId(), accessTtl);
+        String refreshToken = refreshTokenUtil.generateToken();
+
+        // RefreshToken 存入 Redis
+        refreshTokenUtil.saveToken(refreshToken, user.getId(), openid);
+
+        log.info("[Login] userId={} accessTokenExpiresIn={}s refreshTokenMask={}",
+                user.getId(), accessTtl.getSeconds(), RefreshTokenUtil.maskToken(refreshToken));
+
         UserLoginVO userLoginVO = BeanUtils.copyBean(user, UserLoginVO.class);
-        userLoginVO.setToken(token);
+        userLoginVO.setAccessToken(accessToken);
+        userLoginVO.setRefreshToken(refreshToken);
+        userLoginVO.setExpiresIn(accessTtl.getSeconds());
 
         if (StrUtil.isNotBlank(user.getAvatar())) {
             userLoginVO.setAvatar(avatarUrlService.getPresignedAvatarUrl(user.getId(), user.getAvatar()));

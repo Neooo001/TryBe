@@ -5,6 +5,7 @@ import com.trybe.common.domain.R;
 import com.trybe.common.exception.BadRequestException;
 import com.trybe.common.exception.CommonException;
 import com.trybe.common.exception.DbException;
+import com.trybe.common.exception.UnauthorizedException;
 import com.trybe.common.utils.WebUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -42,6 +43,25 @@ import java.net.BindException;
 @RestControllerAdvice
 @Slf4j
 public class CommonExceptionAdvice {
+
+    /**
+     * 认证异常独立处理 — 双 Token 体系
+     *
+     * <p>返回的 code 取决于异常构造时传入的 ErrorCodeEnum：
+     * <ul>
+     *   <li>{@code ACCESS_TOKEN_EXPIRE (40101)} → 前端自动刷新 AccessToken</li>
+     *   <li>{@code TOKEN_INVALID_RELOGIN (40102)} → 前端引导重新登录</li>
+     *   <li>{@code NOT_LOGIN (301)} → 旧兼容场景</li>
+     * </ul>
+     *
+     * <p>日志中 Token 信息由 Gateway 层脱敏，Service 层不再重复打印完整 Token。
+     */
+    @ExceptionHandler(UnauthorizedException.class)
+    public R<Void> handleUnauthorizedException(UnauthorizedException e) {
+        log.warn("认证异常 -> code={} msg={}", e.getCode(), e.getMessage());
+        log.debug("", e);
+        return new R<>(e.getCode(), e.getMessage(), null);
+    }
 
     // ======================== 自定义业务异常 ========================
 

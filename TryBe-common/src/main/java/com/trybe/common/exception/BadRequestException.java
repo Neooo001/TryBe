@@ -1,16 +1,26 @@
 package com.trybe.common.exception;
 
-public class BadRequestException extends CommonException{
+import com.trybe.common.domain.ErrorCodeEnum;
+
+public class BadRequestException extends CommonException {
 
     public BadRequestException(String message) {
-        super(message, 400);
+        super(message, ErrorCodeEnum.PARAM_ERROR.getCode());
     }
 
     public BadRequestException(String message, Throwable cause) {
-        super(message, cause, 400);
+        super(message, cause, ErrorCodeEnum.PARAM_ERROR.getCode());
     }
 
     public BadRequestException(Throwable cause) {
-        super(cause, 400);
+        super(cause, ErrorCodeEnum.PARAM_ERROR.getCode());
+    }
+
+    public BadRequestException(ErrorCodeEnum codeEnum) {
+        super(codeEnum);
+    }
+
+    public BadRequestException(ErrorCodeEnum codeEnum, String customMsg) {
+        super(codeEnum, customMsg);
     }
 }

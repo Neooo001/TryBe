@@ -1,16 +1,26 @@
 package com.trybe.common.exception;
 
-public class UnauthorizedException extends CommonException{
+import com.trybe.common.domain.ErrorCodeEnum;
+
+public class UnauthorizedException extends CommonException {
 
     public UnauthorizedException(String message) {
-        super(message, 401);
+        super(message, ErrorCodeEnum.NOT_LOGIN.getCode());
     }
 
     public UnauthorizedException(String message, Throwable cause) {
-        super(message, cause, 401);
+        super(message, cause, ErrorCodeEnum.NOT_LOGIN.getCode());
     }
 
     public UnauthorizedException(Throwable cause) {
-        super(cause, 401);
+        super(cause, ErrorCodeEnum.NOT_LOGIN.getCode());
+    }
+
+    public UnauthorizedException(ErrorCodeEnum codeEnum) {
+        super(codeEnum);
+    }
+
+    public UnauthorizedException(ErrorCodeEnum codeEnum, String customMsg) {
+        super(codeEnum, customMsg);
     }
 }

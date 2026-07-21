@@ -45,5 +45,13 @@ __pycache__/
 config.local.properties
 *.secret
 
+# Spring Boot 配置文件（application / bootstrap）
+**/application*.yaml
+**/application*.yml
+**/application*.properties
+**/bootstrap*.yaml
+**/bootstrap*.yml
+**/bootstrap*.properties
+
 # 部署文件（nginx、tomcat等）
 hmall-nginx/

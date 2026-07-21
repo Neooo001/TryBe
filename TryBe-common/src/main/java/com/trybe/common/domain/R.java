@@ -30,6 +30,20 @@ public class R<T> {
         return new R<>(e.getCode(), e.getMessage(), null);
     }
 
+    /**
+     * 根据 ErrorCodeEnum 构造错误响应，无侵入替换 R.error(int, String)
+     */
+    public static <T> R<T> error(ErrorCodeEnum codeEnum) {
+        return new R<>(codeEnum.getCode(), codeEnum.getMsg(), null);
+    }
+
+    /**
+     * 根据 ErrorCodeEnum + 自定义提示文案构造错误响应
+     */
+    public static <T> R<T> error(ErrorCodeEnum codeEnum, String customMsg) {
+        return new R<>(codeEnum.getCode(), customMsg, null);
+    }
+
     public R() {
     }
 

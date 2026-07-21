@@ -6,8 +6,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
+import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
@@ -15,6 +17,7 @@ import org.springframework.util.AntPathMatcher;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 
@@ -44,15 +47,24 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
 
         if (headers != null && !headers.isEmpty()){
             token = headers.get(0);
+            // 去掉 "Bearer " 前缀（前端发送 Authorization: Bearer <token>）
+            if (token != null && token.startsWith("Bearer ")) {
+                token = token.substring(7);
+            }
         }
 
         Long userId = null;
         try {
             userId = jwtTool.parseToken(token);
         } catch (Exception e) {
+            // 统一返回 HTTP 200 + JSON body（code=301 未登录），前端通过 data.code 判断
             ServerHttpResponse response = exchange.getResponse();
-            response.setStatusCode(HttpStatus.UNAUTHORIZED);
-            return response.setComplete();
+            response.setStatusCode(HttpStatus.OK);
+            response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
+            String body = "{\"code\":301,\"msg\":\"未登录，请重新登录\",\"data\":null}";
+            DataBuffer buffer = response.bufferFactory()
+                    .wrap(body.getBytes(StandardCharsets.UTF_8));
+            return response.writeWith(Mono.just(buffer));
         }
 
         String userInfo = userId.toString();

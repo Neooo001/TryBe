@@ -1,16 +1,26 @@
 package com.trybe.common.exception;
 
-public class DbException extends CommonException{
+import com.trybe.common.domain.ErrorCodeEnum;
+
+public class DbException extends CommonException {
 
     public DbException(String message) {
-        super(message, 500);
+        super(message, ErrorCodeEnum.DB_ERROR.getCode());
     }
 
     public DbException(String message, Throwable cause) {
-        super(message, cause, 500);
+        super(message, cause, ErrorCodeEnum.DB_ERROR.getCode());
     }
 
     public DbException(Throwable cause) {
-        super(cause, 500);
+        super(cause, ErrorCodeEnum.DB_ERROR.getCode());
+    }
+
+    public DbException(ErrorCodeEnum codeEnum) {
+        super(codeEnum);
+    }
+
+    public DbException(ErrorCodeEnum codeEnum, String customMsg) {
+        super(codeEnum, customMsg);
     }
 }

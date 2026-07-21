@@ -29,9 +29,14 @@ public class User implements Serializable {
     private Long id;
 
     /**
-     * 用户名
+     * 用户昵称
      */
-    private String username;
+    private String nickname;
+
+    /**
+     * 头像OSS存储地址
+     */
+    private String avatar;
 
     /**
      * 密码，加密存储
@@ -44,21 +49,35 @@ public class User implements Serializable {
     private String phone;
 
     /**
-     * 创建时间
-     */
-    private LocalDateTime createTime;
-
-    private LocalDateTime updateTime;
-
-    /**
-     * 使用状态（1正常 2冻结）
+     * 使用状态（0冻结 1正常）
      */
     private UserStatus status;
 
     /**
-     * 账户余额
+     * 微信openid
      */
-    private Integer balance;
+    private String openid;
+
+    /**
+     * 个人介绍
+     */
+    private String bio;
+
+    /**
+     * 性别（0未知 1男 2女）
+     */
+    private Integer gender;
+
+    /**
+     * 创建时间
+     */
+    private LocalDateTime createTime;
+
+    /**
+     * 更新时间
+     */
+    private LocalDateTime updateTime;
+
 
 
 }

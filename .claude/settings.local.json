@@ -15,7 +15,10 @@
       "Bash(where mvn *)",
       "Read(//c/Users/dell0/**)",
       "Bash(\"/c/Users/dell0/.m2/wrapper/dists/apache-maven-3.9.16-bin/5grr65jo27hi51sujmtcldfovl/apache-maven-3.9.16/bin/mvn\" clean *)",
-      "Bash(\"/c/Users/dell0/.m2/wrapper/dists/apache-maven-3.9.16-bin/5grr65jo27hi51sujmtcldfovl/apache-maven-3.9.16/bin/mvn\" compile *)"
+      "Bash(\"/c/Users/dell0/.m2/wrapper/dists/apache-maven-3.9.16-bin/5grr65jo27hi51sujmtcldfovl/apache-maven-3.9.16/bin/mvn\" compile *)",
+      "WebFetch(domain:developers.weixin.qq.com)",
+      "WebSearch",
+      "Bash(ls -la \"C:\\\\Users\\\\dell0\\\\.claude\\\\projects\\\\D--Idea-JavaProject-TryBe\\\\\" 2>/dev/null || echo \"Project directory not found\")"
     ]
   }
 }

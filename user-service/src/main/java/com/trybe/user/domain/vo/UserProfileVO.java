@@ -25,4 +25,7 @@ public class UserProfileVO {
 
     @ApiModelProperty("性别：0未知 1男 2女")
     private Integer gender;
+
+    @ApiModelProperty("手机号")
+    private String phone;
 }

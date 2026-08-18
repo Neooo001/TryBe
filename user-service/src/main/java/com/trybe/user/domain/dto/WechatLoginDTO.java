@@ -5,11 +5,7 @@ import lombok.Data;
 @Data
 public class WechatLoginDTO {
     /**
-     * 用户唯一标识
+     * 微信登录临时code（wx.login 返回）
      */
     private String code;
-    /**
-     * 登录令牌
-     */
-    private String token;
 }

@@ -2,15 +2,13 @@ package com.trybe.common.advice;
 
 import com.trybe.common.domain.ErrorCodeEnum;
 import com.trybe.common.domain.R;
-import com.trybe.common.exception.BadRequestException;
 import com.trybe.common.exception.CommonException;
 import com.trybe.common.exception.DbException;
 import com.trybe.common.exception.UnauthorizedException;
 import com.trybe.common.utils.WebUtils;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.validation.BindException;
 import org.springframework.validation.ObjectError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
@@ -22,7 +20,8 @@ import org.springframework.web.multipart.support.MissingServletRequestPartExcept
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.util.NestedServletException;
 
-import java.net.BindException;
+import javax.validation.ConstraintViolation;
+import javax.validation.ConstraintViolationException;
 
 /**
  * 全局异常通知
@@ -93,9 +92,23 @@ public class CommonExceptionAdvice {
 
     @ExceptionHandler(BindException.class)
     public R<Void> handleBindException(BindException e) {
-        log.error("请求参数绑定异常 ->BindException， {}", e.getMessage());
+        log.error("请求参数绑定异常 -> BindException， {}", e.getMessage());
         log.debug("", e);
         return R.error(ErrorCodeEnum.PARAM_FORMAT_ERR, "请求参数格式错误");
+    }
+
+    /**
+     * 方法级 @Validated 校验异常（如 Controller 类上用 @Validated 触发的校验）
+     */
+    @ExceptionHandler(ConstraintViolationException.class)
+    public R<Void> handleConstraintViolationException(ConstraintViolationException e) {
+        String msg = e.getConstraintViolations()
+                .stream().map(ConstraintViolation::getMessage)
+                .reduce((a, b) -> a + "|" + b)
+                .orElse("参数校验失败");
+        log.warn("方法级参数校验异常 -> {}", msg);
+        log.debug("", e);
+        return R.error(ErrorCodeEnum.PARAM_ERROR, msg);
     }
 
     @ExceptionHandler(NestedServletException.class)

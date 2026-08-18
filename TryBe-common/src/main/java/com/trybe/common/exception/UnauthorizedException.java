@@ -37,4 +37,8 @@ public class UnauthorizedException extends CommonException {
     public UnauthorizedException(ErrorCodeEnum codeEnum, String customMsg) {
         super(codeEnum, customMsg);
     }
+
+    public UnauthorizedException(ErrorCodeEnum codeEnum, String customMsg, Throwable cause) {
+        super(codeEnum, customMsg, cause);
+    }
 }

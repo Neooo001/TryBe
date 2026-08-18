@@ -5,6 +5,7 @@ import cn.hutool.jwt.JWT;
 import cn.hutool.jwt.JWTValidator;
 import cn.hutool.jwt.signers.JWTSigner;
 import cn.hutool.jwt.signers.JWTSignerUtil;
+import com.trybe.common.domain.ErrorCodeEnum;
 import com.trybe.common.exception.UnauthorizedException;
 import org.springframework.stereotype.Component;
 
@@ -36,7 +37,7 @@ public class JwtTool {
     }
 
     /**
-     * 解析token
+     * 解析token（区分过期 vs 非法）
      *
      * @param token token
      * @return 解析刷新token得到的用户信息
@@ -44,31 +45,31 @@ public class JwtTool {
     public Long parseToken(String token) {
         // 1.校验token是否为空
         if (token == null) {
-            throw new UnauthorizedException("未登录");
+            throw new UnauthorizedException(ErrorCodeEnum.TOKEN_INVALID_RELOGIN, "未登录");
         }
         // 2.校验并解析jwt
         JWT jwt;
         try {
             jwt = JWT.of(token).setSigner(jwtSigner);
         } catch (Exception e) {
-            throw new UnauthorizedException("无效的token", e);
+            throw new UnauthorizedException(ErrorCodeEnum.TOKEN_INVALID_RELOGIN, "登录凭证无效", e);
         }
         // 2.校验jwt是否有效
         if (!jwt.verify()) {
             // 验证失败
-            throw new UnauthorizedException("无效的token");
+            throw new UnauthorizedException(ErrorCodeEnum.TOKEN_INVALID_RELOGIN, "登录凭证无效");
         }
         // 3.校验是否过期
         try {
             JWTValidator.of(jwt).validateDate();
         } catch (ValidateException e) {
-            throw new UnauthorizedException("token已经过期");
+            throw new UnauthorizedException(ErrorCodeEnum.ACCESS_TOKEN_EXPIRE, "登录凭证已过期");
         }
         // 4.数据格式校验
         Object userPayload = jwt.getPayload("user");
         if (userPayload == null) {
             // 数据为空
-            throw new UnauthorizedException("无效的token");
+            throw new UnauthorizedException(ErrorCodeEnum.TOKEN_INVALID_RELOGIN, "登录凭证无效");
         }
 
         // 5.数据解析
@@ -76,7 +77,7 @@ public class JwtTool {
            return Long.valueOf(userPayload.toString());
         } catch (RuntimeException e) {
             // 数据格式有误
-            throw new UnauthorizedException("无效的token");
+            throw new UnauthorizedException(ErrorCodeEnum.TOKEN_INVALID_RELOGIN, "登录凭证无效");
         }
     }
 }

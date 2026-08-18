@@ -21,6 +21,6 @@ public class MvcConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new UserInfoInterceotor())
                 .addPathPatterns("/**")
-                .excludePathPatterns("/users/login", "/auth/refresh-token");
+                .excludePathPatterns("/users/login", "/users/phone/login", "/auth/refresh-token", "/hi");
     }
 }

@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 
 
 @Slf4j
@@ -19,6 +20,8 @@ import java.time.Duration;
 public class AvatarUrlService {
 
     private static final String AVATAR_URL_KEY_PREFIX = "avatar:presigned:";
+
+    private static final long REDIS_TTL_BUFFER_SECONDS = 60L;
 
     private final StringRedisTemplate stringRedisTemplate;
     private final OssService ossService;
@@ -40,16 +43,21 @@ public class AvatarUrlService {
 
         String cachedUrl = stringRedisTemplate.opsForValue().get(redisKey);
         if (cachedUrl != null) {
-            log.debug("命中头像预签名URL缓存: userId={}", userId);
-            return cachedUrl;
+            Long remainSeconds = stringRedisTemplate.getExpire(redisKey, TimeUnit.SECONDS);
+            if (remainSeconds != null && remainSeconds > REDIS_TTL_BUFFER_SECONDS) {
+                log.debug("命中头像预签名URL缓存: userId={}, remainSeconds={}", userId, remainSeconds);
+                return cachedUrl;
+            }
+            log.info("头像预签名URL缓存即将过期，重新生成: userId={}, remainSeconds={}", userId, remainSeconds);
         }
 
         String objectKey = extractObjectKey(avatarObjectKey);
         long expireSeconds = getExpireSeconds();
         String presignedUrl = ossService.generatePresignedUrl(objectKey, expireSeconds);
 
-        stringRedisTemplate.opsForValue().set(redisKey, presignedUrl, Duration.ofSeconds(expireSeconds));
-        log.info("生成并缓存头像预签名URL: userId={}, expireSeconds={}", userId, expireSeconds);
+        long redisTtlSeconds = Math.max(expireSeconds - REDIS_TTL_BUFFER_SECONDS, REDIS_TTL_BUFFER_SECONDS);
+        stringRedisTemplate.opsForValue().set(redisKey, presignedUrl, Duration.ofSeconds(redisTtlSeconds));
+        log.info("生成并缓存头像预签名URL: userId={}, ossExpireSeconds={}, redisTtlSeconds={}", userId, expireSeconds, redisTtlSeconds);
 
         return presignedUrl;
     }

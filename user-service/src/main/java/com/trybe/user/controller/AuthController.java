@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit;
  *
  * <h3>限流策略</h3>
  * <p>刷新接口使用内存级简单限流（ConcurrentHashMap），每个 IP 每分钟最多 10 次。
- * 生产环境可替换为 Redis 滑动窗口或 Sentinel。
+ * 过期 Entry 自动回收防止内存泄漏。生产环境可替换为 Redis 滑动窗口或 Sentinel。
  *
  * @author TryBe Team
  */
@@ -40,7 +40,7 @@ public class AuthController {
 
     private final AuthService authService;
 
-    /** 内存级限流：IP → (时间窗口起点, 请求次数) */
+    /** 内存级限流：IP → (时间窗口起点, 请求次数)，过期 Entry 自动回收 */
     private static final Map<String, long[]> RATE_LIMITER = new ConcurrentHashMap<>();
 
     /** 限流窗口大小（毫秒） */
@@ -82,14 +82,22 @@ public class AuthController {
     // ==================== 工具方法 ====================
 
     /**
-     * 内存级滑动窗口限流
+     * 内存级滑动窗口限流 — 过期 Entry 自动回收
+     *
+     * <p>先通过 computeIfPresent 清理过期窗口（返回 null 即移除 Entry），
+     * 再由 computeIfAbsent 重建。避免旧方案中 Entry 永不删除导致的内存泄漏。
      */
     private boolean allowRequest(String clientIp) {
         long now = System.currentTimeMillis();
+
+        // 清理过期窗口：过期则返回 null（移除 Entry）
+        RATE_LIMITER.computeIfPresent(clientIp, (k, window) ->
+                (now - window[0] > RATE_LIMIT_WINDOW_MS) ? null : window);
+
+        // 获取或创建窗口
         long[] window = RATE_LIMITER.computeIfAbsent(clientIp, k -> new long[]{now, 0});
         synchronized (window) {
             if (now - window[0] > RATE_LIMIT_WINDOW_MS) {
-                // 窗口过期，重置
                 window[0] = now;
                 window[1] = 1;
                 return true;

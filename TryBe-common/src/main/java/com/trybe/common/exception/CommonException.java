@@ -33,4 +33,10 @@ public class CommonException extends RuntimeException{
         super(customMsg);
         this.code = codeEnum.getCode();
     }
+
+    // 枚举 + 自定义提示文案 + 原始异常
+    public CommonException(ErrorCodeEnum codeEnum, String customMsg, Throwable cause) {
+        super(customMsg, cause);
+        this.code = codeEnum.getCode();
+    }
 }

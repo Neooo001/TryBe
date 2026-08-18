@@ -1,5 +1,6 @@
 package com.trybe.user.controller;
 
+import com.trybe.common.domain.ErrorCodeEnum;
 import com.trybe.common.domain.R;
 import com.trybe.common.utils.UserContext;
 import com.trybe.user.domain.dto.SetPasswordDTO;
@@ -36,6 +37,9 @@ public class PasswordController {
     @PostMapping("set")
     public R<Void> setPassword(@RequestBody @Validated SetPasswordDTO dto) {
         Long userId = UserContext.getUser();
+        if (userId == null) {
+            return R.error(ErrorCodeEnum.NOT_LOGIN, "请先登录");
+        }
         log.info("设置密码 userId={}", userId);
         passwordService.setPassword(userId, dto.getCode(), dto.getPassword());
         return R.ok();

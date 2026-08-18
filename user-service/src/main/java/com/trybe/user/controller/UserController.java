@@ -46,6 +46,9 @@ public class UserController {
     @GetMapping("profile")
     public R<UserProfileVO> getProfile() {
         Long userId = UserContext.getUser();
+        if (userId == null) {
+            return R.error(ErrorCodeEnum.NOT_LOGIN, "请先登录");
+        }
         log.info("获取用户资料: {}", userId);
         UserProfileVO vo = userService.getUserProfile(userId);
         if (vo == null) {
@@ -63,6 +66,9 @@ public class UserController {
             @RequestParam(value = "gender", required = false) Integer gender) {
 
         Long userId = UserContext.getUser();
+        if (userId == null) {
+            return R.error(ErrorCodeEnum.NOT_LOGIN, "请先登录");
+        }
         log.info("更新用户资料(multipart): {}", userId);
         String avatarObjectKey = null;
         if (avatar != null && !avatar.isEmpty()) {
@@ -77,6 +83,9 @@ public class UserController {
     public R<UserProfileVO> updateProfile(@RequestBody @Validated UserProfileDTO dto) {
 
         Long userId = UserContext.getUser();
+        if (userId == null) {
+            return R.error(ErrorCodeEnum.NOT_LOGIN, "请先登录");
+        }
         log.info("更新用户资料(JSON): {}", userId);
         UserProfileVO vo = userService.updateProfile(userId, null, dto.getNickname(), dto.getBio(), dto.getGender());
         return R.ok(vo);
@@ -86,6 +95,9 @@ public class UserController {
     @GetMapping("avatar-url")
     public R<String> getAvatarUrl() {
         Long userId = UserContext.getUser();
+        if (userId == null) {
+            return R.error(ErrorCodeEnum.NOT_LOGIN, "请先登录");
+        }
         User user = userService.getById(userId);
         if (user == null || user.getAvatar() == null || user.getAvatar().isEmpty()) {
             return R.ok(null);

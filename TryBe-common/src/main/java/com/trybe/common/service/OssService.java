@@ -2,7 +2,9 @@ package com.trybe.common.service;
 
 
 import cn.hutool.core.util.StrUtil;
+import com.aliyun.oss.HttpMethod;
 import com.aliyun.oss.OSS;
+import com.aliyun.oss.model.GeneratePresignedUrlRequest;
 
 import com.trybe.common.config.OssProperties;
 import lombok.RequiredArgsConstructor;
@@ -58,13 +60,83 @@ public class OssService {
     }
 
     /**
-     * 生成预签名URL（使用配置的默认过期时间）
+     * 移动 OSS 文件（OSS 无原生 rename，等价于 copy + delete）
+     *
+     * <p>容错策略：copy 失败不删源文件；copy 成功后 delete 失败仅告警，
+     * 源文件留给 OSS 生命周期规则兜底回收。
+     *
+     * @param sourceKey 源 objectKey
+     * @param targetKey 目标 objectKey
+     */
+    public void moveObject(String sourceKey, String targetKey) {
+        String bucket = ossProperties.getBucketName();
+        ossClient.copyObject(bucket, sourceKey, bucket, targetKey);
+        try {
+            ossClient.deleteObject(bucket, sourceKey);
+            log.info("OSS文件已移动: {} -> {}", sourceKey, targetKey);
+        } catch (Exception e) {
+            log.warn("[OssService] 移动后删除源文件失败，交由生命周期兜底 sourceKey={}", sourceKey, e);
+        }
+    }
+
+    /**
+     * 生成预签名下载URL（使用配置的默认过期时间）
      *
      * @param objectKey 文件在OSS中的objectKey
      * @return 预签名URL字符串
      */
     public String generatePresignedUrl(String objectKey) {
         return generatePresignedUrl(objectKey, getExpireSeconds());
+    }
+
+    /**
+     * 生成预签名上传URL — 客户端直传OSS使用PUT方法
+     *
+     * @param objectKey     文件在OSS中的目标路径
+     * @param expireSeconds 过期时间，单位秒
+     * @return 预签名PUT上传URL字符串
+     */
+    public String generatePresignedPutUrl(String objectKey, long expireSeconds) {
+        return generatePresignedPutUrl(objectKey, expireSeconds, null);
+    }
+
+    /**
+     * 生成预签名上传URL — 客户端直传OSS使用PUT方法（指定Content-Type）
+     *
+     * <p>OSS V1 签名中 Content-Type 参与签名计算，若客户端 PUT 时携带了
+     * Content-Type 请求头，签名时必须设置一致的 Content-Type，否则会返回
+     * 403 SignatureDoesNotMatch。
+     *
+     * @param objectKey     文件在OSS中的目标路径
+     * @param contentType   客户端 PUT 时的 Content-Type，可为 null
+     * @return 预签名PUT上传URL字符串
+     */
+    public String generatePresignedPutUrl(String objectKey, String contentType) {
+        return generatePresignedPutUrl(objectKey, getExpireSeconds(), contentType);
+    }
+
+    /**
+     * 生成预签名上传URL — 客户端直传OSS使用PUT方法（指定Content-Type与过期时间）
+     */
+    public String generatePresignedPutUrl(String objectKey, long expireSeconds, String contentType) {
+        Date expiration = new Date(System.currentTimeMillis() + expireSeconds * 1000);
+        GeneratePresignedUrlRequest request = new GeneratePresignedUrlRequest(
+                ossProperties.getBucketName(), objectKey, HttpMethod.PUT);
+        request.setExpiration(expiration);
+        if (StrUtil.isNotBlank(contentType)) {
+            request.setContentType(contentType);
+        }
+        URL url = ossClient.generatePresignedUrl(request);
+        log.debug("生成预签名上传URL: objectKey={}, contentType={}, expireSeconds={}",
+                objectKey, contentType, expireSeconds);
+        return url.toString();
+    }
+
+    /**
+     * 生成预签名上传URL（使用配置的默认过期时间）
+     */
+    public String generatePresignedPutUrl(String objectKey) {
+        return generatePresignedPutUrl(objectKey, getExpireSeconds());
     }
 
     /**

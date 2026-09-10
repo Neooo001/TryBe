@@ -5,6 +5,7 @@ import cn.hutool.core.util.StrUtil;
 import com.aliyun.oss.HttpMethod;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.model.GeneratePresignedUrlRequest;
+import com.aliyun.oss.model.OSSObject;
 
 import com.trybe.common.config.OssProperties;
 import lombok.RequiredArgsConstructor;
@@ -77,6 +78,17 @@ public class OssService {
         } catch (Exception e) {
             log.warn("[OssService] 移动后删除源文件失败，交由生命周期兜底 sourceKey={}", sourceKey, e);
         }
+    }
+
+    /**
+     * 从 OSS 获取文件输入流
+     *
+     * @param objectKey 文件在OSS中的objectKey
+     * @return 文件输入流，调用方负责关闭
+     */
+    public InputStream getObjectContent(String objectKey) {
+        OSSObject ossObject = ossClient.getObject(ossProperties.getBucketName(), objectKey);
+        return ossObject.getObjectContent();
     }
 
     /**

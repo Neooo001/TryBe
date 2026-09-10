@@ -39,6 +39,8 @@
         <mysql.version>8.0.23</mysql.version>
         <elasticsearch.version>7.12.1</elasticsearch.version>
         <aliyun-oss.version>3.17.4</aliyun-oss.version>
+        <aliyun-facebody.version>3.0.8</aliyun-facebody.version>
+        <baidu-aip.version>4.16.11</baidu-aip.version>
     </properties>
 
     <!-- 对依赖包进行管理 -->
@@ -90,6 +92,18 @@
                 <groupId>com.aliyun.oss</groupId>
                 <artifactId>aliyun-sdk-oss</artifactId>
                 <version>${aliyun-oss.version}</version>
+            </dependency>
+            <!--阿里云人脸人体识别SDK-->
+            <dependency>
+                <groupId>com.aliyun</groupId>
+                <artifactId>facebody20191230</artifactId>
+                <version>${aliyun-facebody.version}</version>
+            </dependency>
+            <!--百度AI Java SDK（手部关键点检测等）-->
+            <dependency>
+                <groupId>com.baidu.aip</groupId>
+                <artifactId>java-sdk</artifactId>
+                <version>${baidu-aip.version}</version>
             </dependency>
 
         </dependencies>

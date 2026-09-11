@@ -82,7 +82,10 @@
       "Bash(/c/Users/dell0/.m2/wrapper/dists/apache-maven-3.9.16-bin/5grr65jo27hi51sujmtcldfovl/apache-maven-3.9.16/bin/mvn -q -am -DskipTests compile)",
       "Bash(zcat spring.log.2026-08-17.0.gz)",
       "Bash(node --check pages/avatar-create/avatar-create.js)",
-      "Bash(unzip -l /c/Users/dell0/.m2/repository/com/aliyun/tea-openapi/0.2.8/tea-openapi-0.2.8.jar)"
+      "Bash(unzip -l /c/Users/dell0/.m2/repository/com/aliyun/tea-openapi/0.2.8/tea-openapi-0.2.8.jar)",
+      "WebFetch(domain:open.taobao.com)",
+      "Read(//d/Idea/JDK/**)",
+      "Read(//d/Idea/IntelliJ IDEA 2024.3.5/plugins/maven/**)"
     ]
   }
 }

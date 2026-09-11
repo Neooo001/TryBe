@@ -52,6 +52,17 @@ public class OssService {
     }
 
     /**
+     * 上传文件内容到 OSS（通用方法，供图片下载后转存等场景使用）
+     *
+     * @param content   文件内容输入流（调用方负责关闭）
+     * @param objectKey 文件在OSS中的objectKey
+     */
+    public void putObject(InputStream content, String objectKey) {
+        ossClient.putObject(ossProperties.getBucketName(), objectKey, content);
+        log.debug("文件已上传: objectKey={}", objectKey);
+    }
+
+    /**
      * 删除 OSS 文件
      * @param objectName 文件在OSS中的完整路径
      */

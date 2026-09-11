@@ -17,6 +17,7 @@
         <module>TryBe-gateway</module>
         <module>material-service</module>
         <module>body-profile-service</module>
+        <module>wardrobe-service</module>
     </modules>
 
     <parent>

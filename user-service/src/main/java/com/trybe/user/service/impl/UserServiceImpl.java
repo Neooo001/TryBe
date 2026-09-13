@@ -2,6 +2,7 @@ package com.trybe.user.service.impl;
 
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.trybe.common.service.OssService;
 import com.trybe.common.utils.BeanUtils;
 import com.trybe.user.config.JwtProperties;
 import com.trybe.user.domain.po.User;
@@ -10,7 +11,6 @@ import com.trybe.user.domain.vo.UserProfileVO;
 import com.trybe.user.domain.vo.WechatSessionVO;
 import com.trybe.user.enums.UserStatus;
 import com.trybe.user.mapper.UserMapper;
-import com.trybe.user.service.AvatarUrlService;
 import com.trybe.user.service.IUserService;
 import com.trybe.user.service.WechatService;
 import com.trybe.user.util.JwtTool;
@@ -31,7 +31,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     private final WechatService wechatService;
     private final JwtTool jwtTool;
     private final JwtProperties jwtProperties;
-    private final AvatarUrlService avatarUrlService;
+    private final OssService ossService;
     private final RefreshTokenUtil refreshTokenUtil;
 
     @Override
@@ -66,7 +66,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         userLoginVO.setExpiresIn(accessTtl.getSeconds());
 
         if (StrUtil.isNotBlank(user.getAvatar())) {
-            userLoginVO.setAvatar(avatarUrlService.getPresignedAvatarUrl(user.getId(), user.getAvatar()));
+            userLoginVO.setAvatar(ossService.getPublicUrl(user.getAvatar()));
         }
 
         return userLoginVO;
@@ -79,10 +79,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         if (user == null) {
             return null;
         }
-        boolean avatarChanged = false;
         if (StrUtil.isNotBlank(avatar)) {
             user.setAvatar(avatar);
-            avatarChanged = true;
         }
         if (StrUtil.isNotBlank(nickname)) {
             user.setNickname(nickname);
@@ -96,14 +94,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         user.setUpdateTime(LocalDateTime.now());
         updateById(user);
 
-        if (avatarChanged) {
-            avatarUrlService.invalidateCache(userId);
-        }
-
         log.info("[updateProfile] 用户 {} 资料已更新", userId);
         UserProfileVO vo = BeanUtils.copyBean(user, UserProfileVO.class, (s, t) -> t.setUserId(s.getId()));
         if (StrUtil.isNotBlank(user.getAvatar())) {
-            vo.setAvatar(avatarUrlService.getPresignedAvatarUrl(userId, user.getAvatar()));
+            vo.setAvatar(ossService.getPublicUrl(user.getAvatar()));
         }
         return vo;
     }
@@ -116,7 +110,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         }
         UserProfileVO vo = BeanUtils.copyBean(user, UserProfileVO.class, (s, t) -> t.setUserId(s.getId()));
         if (StrUtil.isNotBlank(user.getAvatar())) {
-            vo.setAvatar(avatarUrlService.getPresignedAvatarUrl(userId, user.getAvatar()));
+            vo.setAvatar(ossService.getPublicUrl(user.getAvatar()));
         }
         return vo;
     }

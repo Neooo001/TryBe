@@ -10,7 +10,6 @@ import com.trybe.user.domain.dto.WechatLoginDTO;
 import com.trybe.user.domain.po.User;
 import com.trybe.user.domain.vo.UserLoginVO;
 import com.trybe.user.domain.vo.UserProfileVO;
-import com.trybe.user.service.AvatarUrlService;
 import com.trybe.user.service.IUserService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
@@ -29,7 +28,6 @@ public class UserController {
 
     private final IUserService userService;
     private final OssService ossService;
-    private final AvatarUrlService avatarUrlService;
 
     @ApiOperation("用户登录接口")
     @PostMapping("login")
@@ -91,7 +89,7 @@ public class UserController {
         return R.ok(vo);
     }
 
-    @ApiOperation("获取当前用户头像临时URL（URL过期后前端调用此接口刷新）")
+    @ApiOperation("获取当前用户头像URL")
     @GetMapping("avatar-url")
     public R<String> getAvatarUrl() {
         Long userId = UserContext.getUser();
@@ -102,7 +100,6 @@ public class UserController {
         if (user == null || user.getAvatar() == null || user.getAvatar().isEmpty()) {
             return R.ok(null);
         }
-        String presignedUrl = avatarUrlService.getPresignedAvatarUrl(userId, user.getAvatar());
-        return R.ok(presignedUrl);
+        return R.ok(ossService.getPublicUrl(user.getAvatar()));
     }
 }

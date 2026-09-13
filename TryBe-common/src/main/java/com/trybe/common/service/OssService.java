@@ -180,10 +180,27 @@ public class OssService {
         return ossProperties.getExpireSeconds() != null ? ossProperties.getExpireSeconds() : 3600L;
     }
 
-    private String getFileUrl(String objectName) {
+    public String getFileUrl(String objectName) {
         if (StrUtil.isNotBlank(ossProperties.getDomain())) {
             return ossProperties.getDomain() + "/" + objectName;
         }
         return "https://" + ossProperties.getBucketName() + "." + ossProperties.getEndpoint() + "/" + objectName;
+    }
+
+    /**
+     * 获取公共读bucket中文件的永久公开URL
+     * 兼容DB中存储的两种格式：纯objectKey 或 完整URL
+     *
+     * @param avatarValue 数据库中存储的值（objectKey或完整URL）
+     * @return 公开访问URL，如果为空则返回null
+     */
+    public String getPublicUrl(String avatarValue) {
+        if (StrUtil.isBlank(avatarValue)) {
+            return null;
+        }
+        if (avatarValue.startsWith("http")) {
+            return avatarValue;
+        }
+        return getFileUrl(avatarValue);
     }
 }

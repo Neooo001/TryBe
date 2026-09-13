@@ -5,13 +5,13 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.trybe.common.domain.ErrorCodeEnum;
 import com.trybe.common.exception.BizIllegalException;
 import com.trybe.common.exception.UnauthorizedException;
+import com.trybe.common.service.OssService;
 import com.trybe.common.utils.BeanUtils;
 import com.trybe.user.config.JwtProperties;
 import com.trybe.user.domain.po.User;
 import com.trybe.user.domain.vo.UserLoginVO;
 import com.trybe.user.enums.UserStatus;
 import com.trybe.user.mapper.UserMapper;
-import com.trybe.user.service.AvatarUrlService;
 import com.trybe.user.service.IPhoneService;
 import com.trybe.user.util.JwtTool;
 import com.trybe.user.util.RefreshTokenUtil;
@@ -39,7 +39,7 @@ public class PhoneServiceImpl extends ServiceImpl<UserMapper, User> implements I
     private final JwtTool jwtTool;
     private final JwtProperties jwtProperties;
     private final RefreshTokenUtil refreshTokenUtil;
-    private final AvatarUrlService avatarUrlService;
+    private final OssService ossService;
     private final PasswordEncoder passwordEncoder;
 
     @Override
@@ -81,7 +81,7 @@ public class PhoneServiceImpl extends ServiceImpl<UserMapper, User> implements I
         vo.setExpiresIn(accessTtl.getSeconds());
 
         if (StrUtil.isNotBlank(user.getAvatar())) {
-            vo.setAvatar(avatarUrlService.getPresignedAvatarUrl(user.getId(), user.getAvatar()));
+            vo.setAvatar(ossService.getPublicUrl(user.getAvatar()));
         }
 
         return vo;

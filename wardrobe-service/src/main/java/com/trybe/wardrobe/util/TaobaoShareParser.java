@@ -20,7 +20,7 @@ import java.util.regex.Pattern;
 @Slf4j
 public final class TaobaoShareParser {
 
-    private static final Pattern URL_PATTERN = Pattern.compile("https?://[^\\s，。]+");
+    private static final Pattern URL_PATTERN = Pattern.compile("https?://[^\\s，。`」』】}）'\"\\]]+");
     private static final Pattern ID_PARAM_PATTERN = Pattern.compile("[?&](?:id|itemId|item_id)=([0-9]{6,})", Pattern.CASE_INSENSITIVE);
     private static final Pattern ITEM_PATH_PATTERN = Pattern.compile("/item/([0-9]{6,})");
     private static final Pattern LONG_DIGIT_PATTERN = Pattern.compile("([0-9]{11,})");

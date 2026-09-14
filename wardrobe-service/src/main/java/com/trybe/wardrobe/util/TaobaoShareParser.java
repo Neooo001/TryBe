@@ -3,8 +3,6 @@ package com.trybe.wardrobe.util;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
-import com.trybe.common.domain.ErrorCodeEnum;
-import com.trybe.common.exception.BadRequestException;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.regex.Matcher;
@@ -15,7 +13,7 @@ import java.util.regex.Pattern;
  *
  * <p>从形如「【淘宝】https://e.tb.cn/h.8IQi1tW?tk=0IUuT7nKZ8W ...」的分享文案中解析出商品ID。
  * 解析策略：先取链接，尝试从 URL 直接提取，失败则跟随短链重定向，从最终落地 URL 提取，
- * 最后兜底用长数字串匹配。</p>
+ * 最后兜底用长数字串匹配。所有策略均失败时返回 null，由调用方决定是否走 API 兜底。</p>
  */
 @Slf4j
 public final class TaobaoShareParser {
@@ -23,7 +21,10 @@ public final class TaobaoShareParser {
     private static final Pattern URL_PATTERN = Pattern.compile("https?://[^\\s，。`」』】}）'\"\\]]+");
     private static final Pattern ID_PARAM_PATTERN = Pattern.compile("[?&](?:id|itemId|item_id)=([0-9]{6,})", Pattern.CASE_INSENSITIVE);
     private static final Pattern ITEM_PATH_PATTERN = Pattern.compile("/item/([0-9]{6,})");
-    private static final Pattern LONG_DIGIT_PATTERN = Pattern.compile("([0-9]{11,})");
+    private static final Pattern META_REFRESH_PATTERN = Pattern.compile(
+            "http-equiv=['\"]?refresh['\"]?[^>]*content=['\"]?\\d+;\\s*url=['\"]?([^'\"\\s>]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern JS_LOCATION_PATTERN = Pattern.compile(
+            "(?:window\\.)?location\\.(?:href|replace)\\s*[=\\(]\\s*['\"]([^'\"]+)['\"]", Pattern.CASE_INSENSITIVE);
 
     private static final int MAX_REDIRECT = 5;
 
@@ -31,24 +32,21 @@ public final class TaobaoShareParser {
     }
 
     /**
-     * 从分享文案解析商品ID
+     * 从分享文案快速解析商品ID（纯本地策略，无网络开销或仅跟随重定向）
      *
      * @param shareText 分享文案
-     * @return 商品ID（num_iid）
+     * @return 商品ID（num_iid），解析失败返回 null
      */
     public static String parseNumIid(String shareText) {
         if (StrUtil.isBlank(shareText)) {
-            throw new BadRequestException(ErrorCodeEnum.PARAM_EMPTY, "分享文案不能为空");
+            return null;
         }
 
         String url = extractUrl(shareText);
         if (url == null) {
-            // 无链接，尝试直接匹配长数字
-            String numIid = extractLongDigit(shareText);
-            if (numIid != null) {
-                return numIid;
-            }
-            throw new BadRequestException(ErrorCodeEnum.PARAM_FORMAT_ERR, "未在分享文案中识别到淘宝链接");
+            // 纯淘口令（文案里没有任何链接）本地无解，交由上层决定是否走 API 兜底
+            log.debug("[TaobaoShareParser] 文案中未包含链接，本地无法解析");
+            return null;
         }
 
         String numIid = extractNumIidFromUrl(url);
@@ -57,18 +55,7 @@ public final class TaobaoShareParser {
         }
 
         String finalUrl = followRedirects(url);
-        numIid = extractNumIidFromUrl(finalUrl);
-        if (numIid != null) {
-            return numIid;
-        }
-
-        numIid = extractLongDigit(shareText);
-        if (numIid != null) {
-            return numIid;
-        }
-
-        log.warn("[TaobaoShareParser] 无法解析商品ID shareText={} finalUrl={}", shareText, finalUrl);
-        throw new BadRequestException(ErrorCodeEnum.PARAM_FORMAT_ERR, "无法从分享链接中解析商品ID");
+        return extractNumIidFromUrl(finalUrl);
     }
 
     private static String extractUrl(String text) {
@@ -91,9 +78,22 @@ public final class TaobaoShareParser {
         return null;
     }
 
-    private static String extractLongDigit(String text) {
-        Matcher matcher = LONG_DIGIT_PATTERN.matcher(text);
-        return matcher.find() ? matcher.group(1) : null;
+    /**
+     * 把 Location 头解析为绝对地址（淘宝偶发返回相对路径）
+     */
+    private static String resolveAbsolute(String baseUrl, String location) {
+        if (StrUtil.isBlank(location)) {
+            return null;
+        }
+        if (location.startsWith("http")) {
+            return location;
+        }
+        try {
+            return new java.net.URI(baseUrl).resolve(location).toString();
+        } catch (Exception e) {
+            log.warn("[TaobaoShareParser] 相对地址解析失败 base={} location={}", baseUrl, location);
+            return null;
+        }
     }
 
     private static String followRedirects(String url) {
@@ -110,22 +110,48 @@ public final class TaobaoShareParser {
 
     private static String resolveLocation(String url) {
         try (HttpResponse response = HttpRequest.get(url)
-                .header("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)")
+                .header("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1")
                 .setFollowRedirects(false)
                 .timeout(8000)
                 .execute()) {
-            String location = response.header("Location");
-            if (StrUtil.isBlank(location)) {
-                return null;
-            }
-            // 相对路径补全（短链跳转一般返回绝对地址）
-            if (location.startsWith("http")) {
+
+            String location = resolveAbsolute(url, response.header("Location"));
+            if (location != null) {
                 return location;
             }
+
+            String body = response.body();
+            if (StrUtil.isNotBlank(body)) {
+                String fromBody = extractRedirectFromBody(body);
+                if (fromBody != null) {
+                    return fromBody;
+                }
+            }
+
             return null;
         } catch (Exception e) {
             log.warn("[TaobaoShareParser] 跟随重定向失败 url={}", url, e);
             return null;
         }
+    }
+
+    private static String extractRedirectFromBody(String body) {
+        Matcher metaMatcher = META_REFRESH_PATTERN.matcher(body);
+        if (metaMatcher.find()) {
+            String url = metaMatcher.group(1);
+            if (url.startsWith("http")) {
+                return url;
+            }
+        }
+
+        Matcher jsMatcher = JS_LOCATION_PATTERN.matcher(body);
+        if (jsMatcher.find()) {
+            String url = jsMatcher.group(1);
+            if (url.startsWith("http")) {
+                return url;
+            }
+        }
+
+        return null;
     }
 }

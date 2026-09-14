@@ -41,6 +41,7 @@ public class WardrobeController {
     public R<WardrobeItemVO> importFromTaobao(@RequestBody @Valid TaobaoImportReq req) {
         Long userId = requireLogin();
         log.info("[Wardrobe] 淘宝导入请求 userId={}", userId);
+        log.info("源数据：{}", req.toString());
         return R.ok(wardrobeService.importFromTaobao(userId, req));
     }
 

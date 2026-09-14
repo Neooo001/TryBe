@@ -1,7 +1,6 @@
 package com.trybe.wardrobe.service.impl;
 
 import cn.hutool.core.util.StrUtil;
-import cn.hutool.http.HttpUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -10,8 +9,10 @@ import com.trybe.common.domain.ErrorCodeEnum;
 import com.trybe.common.domain.PageDTO;
 import com.trybe.common.domain.PageQuery;
 import com.trybe.common.exception.BadRequestException;
+import com.trybe.common.exception.BizIllegalException;
 import com.trybe.common.exception.ForbiddenException;
 import com.trybe.common.service.OssService;
+import com.trybe.wardrobe.config.TaobaoProperties;
 import com.trybe.wardrobe.domain.dto.TaobaoImportReq;
 import com.trybe.wardrobe.domain.dto.TaobaoProductDTO;
 import com.trybe.wardrobe.domain.enums.WardrobeSource;
@@ -22,6 +23,7 @@ import com.trybe.wardrobe.mapper.ProductMapper;
 import com.trybe.wardrobe.mapper.WardrobeItemMapper;
 import com.trybe.wardrobe.service.ITaobaoService;
 import com.trybe.wardrobe.service.IWardrobeService;
+import com.trybe.wardrobe.util.TaobaoImageUtil;
 import com.trybe.wardrobe.util.TaobaoShareParser;
 import com.trybe.wardrobe.util.WardrobeOssPathBuilder;
 import lombok.RequiredArgsConstructor;
@@ -48,18 +50,20 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
     private final ProductMapper productMapper;
     private final ITaobaoService taobaoService;
     private final OssService ossService;
+    private final TaobaoProperties taobaoProperties;
 
+    /**
+     * 从淘宝导入
+     * @param userId
+     * @param req
+     * @return
+     */
     @Override
     @Transactional
     public WardrobeItemVO importFromTaobao(Long userId, TaobaoImportReq req) {
-        // 1. 解析商品ID
-        String numIidStr = TaobaoShareParser.parseNumIid(req.getShareText());
-        Long numIid;
-        try {
-            numIid = Long.valueOf(numIidStr);
-        } catch (NumberFormatException e) {
-            throw new BadRequestException(ErrorCodeEnum.PARAM_FORMAT_ERR, "无法从分享链接中解析商品ID");
-        }
+        // 1. 解析商品ID：快速路径（本地正则+重定向）→ API兜底（taobao.tbk.tpwd.parse）
+        Long numIid = resolveNumIid(req.getShareText());
+        log.info("[Wardrobe] 解析商品ID shareText={} numIid={}", req.getShareText(), numIid);
 
         // 2. 商品去重：已存在则复用
         Product product = findByNumIid(numIid);
@@ -191,6 +195,37 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
     // ==================== 私有方法 ====================
 
     /**
+     * 解析商品ID：快速路径 → API兜底
+     *
+     * <p>1. 先用 TaobaoShareParser 本地正则+重定向快速解析（零API开销）
+     * 2. 失败则调用 taobao.tbk.tpwd.parse 官方API解析
+     * 3. 均失败则抛异常</p>
+     */
+    private Long resolveNumIid(String shareText) {
+        if (StrUtil.isBlank(shareText)) {
+            throw new BadRequestException(ErrorCodeEnum.PARAM_EMPTY, "分享文案不能为空");
+        }
+
+        // 快速路径：本地正则 + 重定向
+        String numIidStr = TaobaoShareParser.parseNumIid(shareText);
+        if (numIidStr != null) {
+            try {
+                return Long.valueOf(numIidStr);
+            } catch (NumberFormatException e) {
+                log.warn("[Wardrobe] 本地解析商品ID格式错误 numIidStr={}", numIidStr);
+            }
+        }
+
+        // API兜底：taobao.tbk.tpwd.parse
+        Long numIid = taobaoService.tpwdParse(shareText);
+        if (numIid != null) {
+            return numIid;
+        }
+
+        throw new BadRequestException(ErrorCodeEnum.PARAM_FORMAT_ERR, "无法从分享链接中解析商品ID");
+    }
+
+    /**
      * 查询并落库商品（含下载图片上传 OSS）
      */
     private Product fetchAndSaveProduct(Long numIid) {
@@ -214,13 +249,28 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
         product.setCategory(dto.getCategory());
         product.setRawJson(dto.getRawJson());
 
-        // 下载主图 + 详情图并上传 OSS
-        String mainKey = downloadAndUpload(dto.getPictUrl(), WardrobeOssPathBuilder.productMain(numIid));
+        // 下载主图 + 详情图并转存 OSS
+        // 主图是试穿的输入素材，必须成功；详情图失败可跳过，不影响主流程
+        byte[] mainBytes = TaobaoImageUtil.download(dto.getPictUrl());
+        if (mainBytes == null) {
+            log.warn("[Wardrobe] 商品主图下载失败 numIid={} pictUrl={}", numIid, dto.getPictUrl());
+            throw new BizIllegalException(ErrorCodeEnum.THIRD_PARTY_ERROR, "商品主图获取失败，请稍后重试");
+        }
+        String mainKey = uploadBytes(mainBytes, WardrobeOssPathBuilder.productMain(numIid));
+
         List<String> detailKeys = new ArrayList<>();
         if (dto.getSmallImages() != null) {
+            int max = Math.max(0, taobaoProperties.getMaxDetailImages());
             int index = 1;
             for (String url : dto.getSmallImages()) {
-                String key = downloadAndUpload(url, WardrobeOssPathBuilder.productDetail(numIid, index));
+                if (detailKeys.size() >= max) {
+                    break;
+                }
+                byte[] bytes = TaobaoImageUtil.download(url);
+                if (bytes == null) {
+                    continue;
+                }
+                String key = uploadBytes(bytes, WardrobeOssPathBuilder.productDetail(numIid, index));
                 if (key != null) {
                     detailKeys.add(key);
                 }
@@ -238,18 +288,12 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
         return product;
     }
 
-    private String downloadAndUpload(String url, String objectKey) {
-        if (StrUtil.isBlank(url)) {
-            return null;
-        }
-        try {
-            byte[] bytes = HttpUtil.downloadBytes(url);
-            try (ByteArrayInputStream in = new ByteArrayInputStream(bytes)) {
-                ossService.putObject(in, objectKey);
-            }
+    private String uploadBytes(byte[] bytes, String objectKey) {
+        try (ByteArrayInputStream in = new ByteArrayInputStream(bytes)) {
+            ossService.putObject(in, objectKey);
             return objectKey;
-        } catch (Exception e) {
-            log.warn("[Wardrobe] 图片下载或上传失败 url={} objectKey={}", url, objectKey, e);
+        } catch (IOException e) {
+            log.warn("[Wardrobe] 图片上传OSS失败 objectKey={}", objectKey, e);
             return null;
         }
     }

@@ -55,3 +55,4 @@ config.local.properties
 
 # 部署文件（nginx、tomcat等）
 hmall-nginx/
+/.claude/

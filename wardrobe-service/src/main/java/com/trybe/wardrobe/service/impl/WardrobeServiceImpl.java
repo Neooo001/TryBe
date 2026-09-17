@@ -3,6 +3,7 @@ package com.trybe.wardrobe.service.impl;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.trybe.common.domain.ErrorCodeEnum;
@@ -15,7 +16,10 @@ import com.trybe.common.service.OssService;
 import com.trybe.wardrobe.config.TaobaoProperties;
 import com.trybe.wardrobe.domain.dto.TaobaoImportReq;
 import com.trybe.wardrobe.domain.dto.TaobaoProductDTO;
+import com.trybe.wardrobe.domain.dto.UpdateWardrobeReq;
+import com.trybe.wardrobe.domain.enums.GarmentCategoryL1;
 import com.trybe.wardrobe.domain.enums.WardrobeSource;
+import com.trybe.wardrobe.domain.enums.WearStatus;
 import com.trybe.wardrobe.domain.po.Product;
 import com.trybe.wardrobe.domain.po.WardrobeItem;
 import com.trybe.wardrobe.domain.vo.WardrobeItemVO;
@@ -23,6 +27,7 @@ import com.trybe.wardrobe.mapper.ProductMapper;
 import com.trybe.wardrobe.mapper.WardrobeItemMapper;
 import com.trybe.wardrobe.service.ITaobaoService;
 import com.trybe.wardrobe.service.IWardrobeService;
+import com.trybe.wardrobe.service.WardrobeItemConverter;
 import com.trybe.wardrobe.util.TaobaoImageUtil;
 import com.trybe.wardrobe.util.TaobaoShareParser;
 import com.trybe.wardrobe.util.WardrobeOssPathBuilder;
@@ -36,8 +41,9 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 衣柜服务实现
@@ -51,12 +57,10 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
     private final ITaobaoService taobaoService;
     private final OssService ossService;
     private final TaobaoProperties taobaoProperties;
+    private final WardrobeItemConverter converter;
 
     /**
      * 从淘宝导入
-     * @param userId
-     * @param req
-     * @return
      */
     @Override
     @Transactional
@@ -71,20 +75,16 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
             product = fetchAndSaveProduct(numIid);
         }
 
-        // 3. 创建衣柜条目
-        WardrobeItem item = new WardrobeItem();
-        item.setUserId(userId);
-        item.setSource(WardrobeSource.TAOBAO_IMPORT.getValue());
+        // 3. 创建衣柜条目（衣服属性留空，用户可在详情页补充；后续由 AI 补全任务填充）
+        WardrobeItem item = newItem(userId, WardrobeSource.TAOBAO_IMPORT);
         item.setProductId(product.getId());
         item.setTitle(product.getTitle());
         item.setImageKey(product.getMainImageKey());
         item.setDetailImageKeys(product.getDetailImageKeys());
-        item.setCreateTime(LocalDateTime.now());
-        item.setUpdateTime(LocalDateTime.now());
         save(item);
 
         log.info("[Wardrobe] 淘宝导入成功 userId={} numIid={} wardrobeId={}", userId, numIid, item.getId());
-        return toVO(item, product);
+        return converter.toVO(item, product);
     }
 
     @Override
@@ -99,18 +99,15 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
         String imageKey = WardrobeOssPathBuilder.custom(userId, extensionOf(image.getOriginalFilename()));
         uploadMultipart(image, imageKey);
 
-        WardrobeItem item = new WardrobeItem();
-        item.setUserId(userId);
-        item.setSource(WardrobeSource.MANUAL.getValue());
+        WardrobeItem item = newItem(userId, WardrobeSource.MANUAL);
         item.setTitle(title);
         item.setImageKey(imageKey);
+        item.setOriginImageKey(imageKey);
         item.setRemark(remark);
-        item.setCreateTime(LocalDateTime.now());
-        item.setUpdateTime(LocalDateTime.now());
         save(item);
 
         log.info("[Wardrobe] 手动添加成功 userId={} wardrobeId={}", userId, item.getId());
-        return toVO(item, null);
+        return converter.toVO(item, null);
     }
 
     @Override
@@ -125,55 +122,106 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
         String imageKey = WardrobeOssPathBuilder.outfit(userId, extensionOf(image.getOriginalFilename()));
         uploadMultipart(image, imageKey);
 
-        WardrobeItem item = new WardrobeItem();
-        item.setUserId(userId);
-        item.setSource(WardrobeSource.CUSTOM_OUTFIT.getValue());
+        WardrobeItem item = newItem(userId, WardrobeSource.CUSTOM_OUTFIT);
         item.setTitle(title);
         item.setImageKey(imageKey);
+        item.setOriginImageKey(imageKey);
         item.setRemark(remark);
-        item.setCreateTime(LocalDateTime.now());
-        item.setUpdateTime(LocalDateTime.now());
         save(item);
 
         log.info("[Wardrobe] 自定义穿搭添加成功 userId={} wardrobeId={}", userId, item.getId());
-        return toVO(item, null);
+        return converter.toVO(item, null);
     }
 
     @Override
-    public PageDTO<WardrobeItemVO> listWardrobe(Long userId, String source, PageQuery pageQuery) {
+    public PageDTO<WardrobeItemVO> listWardrobe(Long userId, String source, String categoryL1,
+                                                String wearStatus, String keyword, PageQuery pageQuery) {
         LambdaQueryWrapper<WardrobeItem> wrapper = new LambdaQueryWrapper<WardrobeItem>()
                 .eq(WardrobeItem::getUserId, userId);
 
         if (StrUtil.isNotBlank(source)) {
             wrapper.eq(WardrobeItem::getSource, WardrobeSource.of(source).getValue());
         }
+        if (StrUtil.isNotBlank(categoryL1)) {
+            wrapper.eq(WardrobeItem::getCategoryL1, categoryL1.trim().toUpperCase());
+        }
+        if (StrUtil.isNotBlank(wearStatus)) {
+            wrapper.eq(WardrobeItem::getWearStatus, WearStatus.of(wearStatus).getValue());
+        }
+        if (StrUtil.isNotBlank(keyword)) {
+            String kw = keyword.trim();
+            wrapper.and(w -> w.like(WardrobeItem::getTitle, kw)
+                    .or().like(WardrobeItem::getBrand, kw)
+                    .or().like(WardrobeItem::getRemark, kw));
+        }
 
         Page<WardrobeItem> page = pageQuery.toMpPageDefaultSortByCreateTimeDesc();
         page = baseMapper.selectPage(page, wrapper);
 
-        return PageDTO.of(page, item -> toVO(item, findProductById(item.getProductId())));
+        return PageDTO.of(page, item -> converter.toVO(item, findProductById(item.getProductId())));
     }
 
     @Override
     public WardrobeItemVO getDetail(Long userId, Long wardrobeId) {
         WardrobeItem item = getOwnedItem(userId, wardrobeId);
-        return toVO(item, findProductById(item.getProductId()));
+        return converter.toVO(item, findProductById(item.getProductId()));
+    }
+
+    /**
+     * 按一级分类统计数量：一条 GROUP BY 拿全量，避免前端按分类逐个请求。
+     *
+     * <p>未归类（category_l1 为 null/空/非法值）统一归口到 {@link GarmentCategoryL1#OTHER}，
+     * 与前端「未分类」Tab 的 key 对齐（否则这类条目只进得去「全部」、在任何 Tab 上都看不到）。
+     */
+    @Override
+    public Map<String, Integer> countByCategory(Long userId) {
+        List<Map<String, Object>> rows = baseMapper.selectMaps(new QueryWrapper<WardrobeItem>()
+                .select("category_l1", "COUNT(*) AS cnt")
+                .eq("user_id", userId)
+                .groupBy("category_l1"));
+
+        Map<String, Integer> result = new HashMap<>();
+        int total = 0;
+        for (Map<String, Object> row : rows) {
+            Object code = pick(row, "category_l1");
+            Object cnt = pick(row, "cnt");
+            // 复用宽松解析器归一：null/空/大写小写/中文名都能落到正确的 code，兜底为 OTHER
+            String key = GarmentCategoryL1.of(code == null ? null : String.valueOf(code)).getCode();
+            int count = cnt == null ? 0 : ((Number) cnt).intValue();
+            // 同一 key 理论上不会重复，这里做一次累加，防御 SQL 层出现多行同码
+            result.merge(key, count, Integer::sum);
+            total += count;
+        }
+        result.put("ALL", total);
+        return result;
+    }
+
+    /**
+     * 容错取列：不同 JDBC/MP 版本下 selectMaps 返回 map 的 key 可能是别名、下划线原名或大小写变体，
+     * 直接 get 取不到会静默归零，这里做归一化匹配兜底。
+     */
+    private Object pick(Map<String, Object> row, String column) {
+        if (row.containsKey(column)) {
+            return row.get(column);
+        }
+        String normalized = column.replace("_", "").toLowerCase();
+        for (Map.Entry<String, Object> entry : row.entrySet()) {
+            String key = entry.getKey() == null ? "" : entry.getKey().replace("_", "").toLowerCase();
+            if (key.equals(normalized)) {
+                return entry.getValue();
+            }
+        }
+        return null;
     }
 
     @Override
     @Transactional
-    public WardrobeItemVO updateItem(Long userId, Long wardrobeId, String title, String remark) {
+    public WardrobeItemVO updateItem(Long userId, Long wardrobeId, UpdateWardrobeReq req) {
         WardrobeItem item = getOwnedItem(userId, wardrobeId);
-        if (StrUtil.isNotBlank(title)) {
-            item.setTitle(title);
-        }
-        if (remark != null) {
-            item.setRemark(remark);
-        }
-        item.setUpdateTime(LocalDateTime.now());
+        converter.applyUpdate(item, req);
         updateById(item);
         log.info("[Wardrobe] 编辑成功 userId={} wardrobeId={}", userId, wardrobeId);
-        return toVO(item, findProductById(item.getProductId()));
+        return converter.toVO(item, findProductById(item.getProductId()));
     }
 
     @Override
@@ -181,11 +229,13 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
     public void deleteItem(Long userId, Long wardrobeId) {
         WardrobeItem item = getOwnedItem(userId, wardrobeId);
 
-        // 手动/穿搭来源：删除用户目录下的图片文件；淘宝导入仅解除关联，不动公共商品与图片
-        if (WardrobeSource.MANUAL.getValue().equals(item.getSource())
-                || WardrobeSource.CUSTOM_OUTFIT.getValue().equals(item.getSource())) {
+        // 用户私有来源（AI导入/手动/穿搭）：删除用户目录下的图片文件
+        // 淘宝导入仅解除关联，不动公共商品与图片
+        if (!WardrobeSource.TAOBAO_IMPORT.getValue().equals(item.getSource())) {
             deleteFileQuietly(item.getImageKey());
-            deleteFileQuietly(parseKeys(item.getDetailImageKeys()));
+            deleteFileQuietly(item.getOriginImageKey());
+            deleteFileQuietly(item.getCutoutImageKey());
+            deleteFileQuietly(converter.toStringList(item.getDetailImageKeys()));
         }
 
         removeById(wardrobeId);
@@ -195,18 +245,28 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
     // ==================== 私有方法 ====================
 
     /**
+     * 构造带默认值的衣柜条目（统一初始化穿着状态与穿着次数）
+     */
+    private WardrobeItem newItem(Long userId, WardrobeSource source) {
+        WardrobeItem item = new WardrobeItem();
+        item.setUserId(userId);
+        item.setSource(source.getValue());
+        item.setWearStatus(WearStatus.WEARING.getValue());
+        item.setWearCount(0);
+        item.setAiRecognized(0);
+        item.setCreateTime(LocalDateTime.now());
+        item.setUpdateTime(LocalDateTime.now());
+        return item;
+    }
+
+    /**
      * 解析商品ID：快速路径 → API兜底
-     *
-     * <p>1. 先用 TaobaoShareParser 本地正则+重定向快速解析（零API开销）
-     * 2. 失败则调用 taobao.tbk.tpwd.parse 官方API解析
-     * 3. 均失败则抛异常</p>
      */
     private Long resolveNumIid(String shareText) {
         if (StrUtil.isBlank(shareText)) {
             throw new BadRequestException(ErrorCodeEnum.PARAM_EMPTY, "分享文案不能为空");
         }
 
-        // 快速路径：本地正则 + 重定向
         String numIidStr = TaobaoShareParser.parseNumIid(shareText);
         if (numIidStr != null) {
             try {
@@ -216,7 +276,6 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
             }
         }
 
-        // API兜底：taobao.tbk.tpwd.parse
         Long numIid = taobaoService.tpwdParse(shareText);
         if (numIid != null) {
             return numIid;
@@ -238,7 +297,7 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
         product.setNumIid(numIid);
         product.setTitle(dto.getTitle());
         product.setPictUrl(dto.getPictUrl());
-        product.setSmallImages(JSONUtil.toJsonStr(dto.getSmallImages() == null ? Collections.emptyList() : dto.getSmallImages()));
+        product.setSmallImages(JSONUtil.toJsonStr(dto.getSmallImages() == null ? new ArrayList<String>() : dto.getSmallImages()));
         product.setReservePrice(dto.getReservePrice());
         product.setZkFinalPrice(dto.getZkFinalPrice());
         product.setItemUrl(dto.getItemUrl());
@@ -249,7 +308,6 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
         product.setCategory(dto.getCategory());
         product.setRawJson(dto.getRawJson());
 
-        // 下载主图 + 详情图并转存 OSS
         // 主图是试穿的输入素材，必须成功；详情图失败可跳过，不影响主流程
         byte[] mainBytes = TaobaoImageUtil.download(dto.getPictUrl());
         if (mainBytes == null) {
@@ -329,58 +387,6 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
         return item;
     }
 
-    private WardrobeItemVO toVO(WardrobeItem item, Product product) {
-        WardrobeItemVO vo = new WardrobeItemVO();
-        vo.setWardrobeId(item.getId());
-        vo.setSource(item.getSource());
-        vo.setProductId(item.getProductId());
-        vo.setTitle(item.getTitle());
-        vo.setRemark(item.getRemark());
-        vo.setCreateTime(item.getCreateTime());
-
-        vo.setImageUrl(presign(item.getImageKey()));
-        vo.setDetailImageUrls(presignList(parseKeys(item.getDetailImageKeys())));
-
-        if (product != null) {
-            vo.setNumIid(product.getNumIid());
-            vo.setReservePrice(product.getReservePrice());
-            vo.setZkFinalPrice(product.getZkFinalPrice());
-            vo.setItemUrl(product.getItemUrl());
-            vo.setShopTitle(product.getShopTitle());
-        }
-        return vo;
-    }
-
-    private String presign(String objectKey) {
-        return StrUtil.isBlank(objectKey) ? null : ossService.generatePresignedUrl(objectKey);
-    }
-
-    private List<String> presignList(List<String> objectKeys) {
-        if (objectKeys == null || objectKeys.isEmpty()) {
-            return Collections.emptyList();
-        }
-        List<String> urls = new ArrayList<>();
-        for (String key : objectKeys) {
-            String url = presign(key);
-            if (url != null) {
-                urls.add(url);
-            }
-        }
-        return urls;
-    }
-
-    private List<String> parseKeys(String json) {
-        if (StrUtil.isBlank(json)) {
-            return Collections.emptyList();
-        }
-        try {
-            return JSONUtil.toList(json, String.class);
-        } catch (Exception e) {
-            log.warn("[Wardrobe] objectKey列表反序列化失败: {}", json, e);
-            return Collections.emptyList();
-        }
-    }
-
     private void deleteFileQuietly(String objectKey) {
         if (StrUtil.isBlank(objectKey)) {
             return;
@@ -393,7 +399,7 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
     }
 
     private void deleteFileQuietly(List<String> objectKeys) {
-        if (objectKeys == null) {
+        if (objectKeys == null || objectKeys.isEmpty()) {
             return;
         }
         for (String key : objectKeys) {

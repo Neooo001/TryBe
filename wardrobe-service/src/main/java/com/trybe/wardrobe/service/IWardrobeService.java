@@ -3,6 +3,7 @@ package com.trybe.wardrobe.service;
 import com.trybe.common.domain.PageDTO;
 import com.trybe.common.domain.PageQuery;
 import com.trybe.wardrobe.domain.dto.TaobaoImportReq;
+import com.trybe.wardrobe.domain.dto.UpdateWardrobeReq;
 import com.trybe.wardrobe.domain.vo.WardrobeItemVO;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -17,7 +18,7 @@ public interface IWardrobeService {
     WardrobeItemVO importFromTaobao(Long userId, TaobaoImportReq req);
 
     /**
-     * 手动添加（图片可选）
+     * 手动添加
      */
     WardrobeItemVO addManual(Long userId, String title, String remark, MultipartFile image);
 
@@ -28,8 +29,14 @@ public interface IWardrobeService {
 
     /**
      * 分页查询衣柜
+     *
+     * @param source     来源筛选，可空
+     * @param categoryL1 一级分类筛选，可空
+     * @param wearStatus 穿着状态筛选，可空
+     * @param keyword    标题/品牌/备注模糊匹配，可空
      */
-    PageDTO<WardrobeItemVO> listWardrobe(Long userId, String source, PageQuery pageQuery);
+    PageDTO<WardrobeItemVO> listWardrobe(Long userId, String source, String categoryL1,
+                                         String wearStatus, String keyword, PageQuery pageQuery);
 
     /**
      * 衣柜详情
@@ -37,9 +44,16 @@ public interface IWardrobeService {
     WardrobeItemVO getDetail(Long userId, Long wardrobeId);
 
     /**
-     * 编辑条目（title/remark）
+     * 按一级分类统计条目数量（衣橱页分类 Tab 的角标）
+     *
+     * @return key = 一级分类码（未归类为 {@code UNKNOWN}），value = 数量
      */
-    WardrobeItemVO updateItem(Long userId, Long wardrobeId, String title, String remark);
+    java.util.Map<String, Integer> countByCategory(Long userId);
+
+    /**
+     * 编辑条目（全字段，非 null 即覆盖）
+     */
+    WardrobeItemVO updateItem(Long userId, Long wardrobeId, UpdateWardrobeReq req);
 
     /**
      * 删除条目

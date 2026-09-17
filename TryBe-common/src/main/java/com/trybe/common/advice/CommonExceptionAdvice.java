@@ -16,6 +16,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.util.NestedServletException;
@@ -174,11 +175,57 @@ public class CommonExceptionAdvice {
         return R.error(ErrorCodeEnum.DATA_NOT_FOUND, "请求路径不存在");
     }
 
+    /**
+     * 上传文件大小超限
+     *
+     * <p>Spring Boot 默认 max-file-size=1MB，已通过 {@code spring.servlet.multipart.max-file-size}
+     * 调整为 20MB。该异常在 {@code DispatcherServlet.checkMultipart(request)} 阶段抛出，
+     * 会经 processHandlerException → ExceptionHandlerExceptionResolver 命中本方法。
+     * 返回友好提示而非 SERVER_ERROR，避免用户只看到「服务器繁忙」。
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public R<Void> handleMaxUploadSizeExceeded(MaxUploadSizeExceededException e) {
+        log.warn("上传文件过大: {}", e.getMessage());
+        return R.error(ErrorCodeEnum.PARAM_LENGTH_LIMIT, "文件过大，单个文件不能超过 20MB，请压缩后重试");
+    }
+
     // ======================== 兜底异常 ========================
 
     @ExceptionHandler(Exception.class)
     public R<Void> handleRuntimeException(Exception e) {
+        // 兜底加固：上传大小超限可能被包装后落到此处（异常本身或其 cause 链）
+        if (isUploadSizeExceeded(e)) {
+            log.warn("上传文件过大(被包装): {}", e.getMessage());
+            return R.error(ErrorCodeEnum.PARAM_LENGTH_LIMIT, "文件过大，单个文件不能超过 20MB，请压缩后重试");
+        }
         log.error("其他异常 uri : {} -> ", WebUtils.getRequest().getRequestURI(), e);
         return R.error(ErrorCodeEnum.SERVER_ERROR);
+    }
+
+    /**
+     * 递归判断异常链上是否命中「上传文件过大」特征。
+     *
+     * <p>部分容器/框架会把 {@code MaxUploadSizeExceededException} 或
+     * {@code FileSizeLimitExceededException} 包装成其它异常，故对异常本身及 cause 链
+     * 同时做类型与消息特征匹配，避免漏网。
+     */
+    private boolean isUploadSizeExceeded(Throwable e) {
+        Throwable cur = e;
+        int depth = 0;
+        while (cur != null && depth < 10) {
+            String className = cur.getClass().getName();
+            if (cur instanceof MaxUploadSizeExceededException
+                    || className.contains("FileSizeLimitExceededException")
+                    || className.contains("SizeLimitExceededException")) {
+                return true;
+            }
+            String msg = cur.getMessage();
+            if (msg != null && msg.contains("exceed its maximum permitted size")) {
+                return true;
+            }
+            cur = cur.getCause();
+            depth++;
+        }
+        return false;
     }
 }

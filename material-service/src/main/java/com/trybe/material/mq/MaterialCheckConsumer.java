@@ -2,6 +2,7 @@ package com.trybe.material.mq;
 
 import com.rabbitmq.client.Channel;
 import com.trybe.common.service.OssService;
+import com.trybe.common.service.RedisIdempotentGuard;
 import com.trybe.material.config.MaterialMqConfig;
 import com.trybe.material.domain.dto.MaterialCheckMessage;
 import com.trybe.material.domain.enums.CheckType;
@@ -16,14 +17,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.amqp.support.AmqpHeaders;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
-import java.util.concurrent.TimeUnit;
 
 /**
  * <p>
@@ -49,7 +48,7 @@ public class MaterialCheckConsumer {
     private final IMaterialService materialService;
     private final IMaterialCheckLogService checkLogService;
     private final MaterialCheckContext checkContext;
-    private final StringRedisTemplate stringRedisTemplate;
+    private final RedisIdempotentGuard idempotentGuard;
     private final OssService ossService;
 
     private static final String TMP_PATH_PREFIX = "material/tmp/";
@@ -66,12 +65,9 @@ public class MaterialCheckConsumer {
 
         // ========== 1. Redis 幂等校验 ==========
         String idempotentKey = IDEMPOTENT_KEY_PREFIX + materialId;
-        Boolean acquired = stringRedisTemplate.opsForValue()
-                .setIfAbsent(idempotentKey, messageId, IDEMPOTENT_TTL_MINUTES, TimeUnit.MINUTES);
-        if (Boolean.FALSE.equals(acquired)) {
-            String existingMsgId = stringRedisTemplate.opsForValue().get(idempotentKey);
+        if (!idempotentGuard.tryAcquire(idempotentKey, messageId, IDEMPOTENT_TTL_MINUTES)) {
             log.warn("[MaterialCheckConsumer] 重复消费，已跳过 materialId={} existingMsgId={} currentMsgId={}",
-                    materialId, existingMsgId, messageId);
+                    materialId, idempotentGuard.peek(idempotentKey), messageId);
             channel.basicAck(deliveryTag, false);
             return;
         }

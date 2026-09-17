@@ -1,7 +1,6 @@
 package com.trybe.bodyprofile.controller;
 
 import com.trybe.api.dto.BodyProfileDTO;
-import com.trybe.common.domain.ErrorCodeEnum;
 import com.trybe.common.domain.R;
 import com.trybe.common.utils.UserContext;
 import com.trybe.bodyprofile.domain.dto.UpsertProfileReq;
@@ -35,15 +34,16 @@ public class BodyProfileController {
     @ApiOperation("获取我的档案（含关联素材）")
     @GetMapping("/mine")
     public R<BodyProfileVO> getMyProfile() {
-        Long userId = requireLogin();
+        Long userId = UserContext.requireUser();
         BodyProfileVO vo = profileService.getMyProfile(userId);
         return R.ok(vo);
+
     }
 
     @ApiOperation("保存我的身型档案（不存在则创建）")
     @PutMapping("/mine")
     public R<BodyProfileVO> upsertBody(@RequestBody UpsertProfileReq req) {
-        Long userId = requireLogin();
+        Long userId = UserContext.requireUser();
         log.info("[BodyProfile] 保存身型档案 userId={}", userId);
         BodyProfileVO vo = profileService.upsertBody(userId, req);
         return R.ok(vo);
@@ -52,7 +52,7 @@ public class BodyProfileController {
     @ApiOperation("关联素材到我的档案")
     @PostMapping("/mine/materials")
     public R<BodyProfileVO> linkMaterial(@RequestBody Map<String, Long> body) {
-        Long userId = requireLogin();
+        Long userId = UserContext.requireUser();
         Long materialId = body.get("materialId");
         log.info("[BodyProfile] 关联素材 userId={} materialId={}", userId, materialId);
         BodyProfileVO vo = profileService.linkMaterial(userId, materialId);
@@ -62,7 +62,7 @@ public class BodyProfileController {
     @ApiOperation("解除素材与档案的关联")
     @DeleteMapping("/mine/materials/{materialId}")
     public R<Void> unlinkMaterial(@ApiParam("素材ID") @PathVariable Long materialId) {
-        Long userId = requireLogin();
+        Long userId = UserContext.requireUser();
         log.info("[BodyProfile] 解除素材关联 userId={} materialId={}", userId, materialId);
         profileService.unlinkMaterial(userId, materialId);
         return R.ok();
@@ -71,7 +71,7 @@ public class BodyProfileController {
     @ApiOperation("设置素材为主素材")
     @PutMapping("/mine/materials/{materialId}/primary")
     public R<BodyProfileVO> setPrimaryMaterial(@ApiParam("素材ID") @PathVariable Long materialId) {
-        Long userId = requireLogin();
+        Long userId = UserContext.requireUser();
         log.info("[BodyProfile] 设置主素材 userId={} materialId={}", userId, materialId);
         BodyProfileVO vo = profileService.setPrimaryMaterial(userId, materialId);
         return R.ok(vo);
@@ -113,13 +113,5 @@ public class BodyProfileController {
             return mdto;
         }).collect(java.util.stream.Collectors.toList()));
         return dto;
-    }
-
-    private Long requireLogin() {
-        Long userId = UserContext.getUser();
-        if (userId == null) {
-            throw new com.trybe.common.exception.UnauthorizedException(ErrorCodeEnum.NOT_LOGIN, "请先登录");
-        }
-        return userId;
     }
 }

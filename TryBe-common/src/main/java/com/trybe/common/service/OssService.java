@@ -8,6 +8,7 @@ import com.aliyun.oss.model.GeneratePresignedUrlRequest;
 import com.aliyun.oss.model.OSSObject;
 
 import com.trybe.common.config.OssProperties;
+import com.trybe.common.utils.FileTypeUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -37,8 +38,9 @@ public class OssService {
      * @return 文件在OSS中的objectKey
      */
     public String uploadAvatar(MultipartFile file, Long userId) {
-        String originalFilename = file.getOriginalFilename();
-        String extension = StrUtil.subAfter(originalFilename, ".", true);
+        // 扩展名统一走 FileTypeUtils：大小写归一 + 过滤非法字符，
+        // 避免产出 avatar/1/original.JPG 这类大小写混杂、难以匹配生命周期规则的路径
+        String extension = FileTypeUtils.extensionOf(file.getOriginalFilename());
         String objectName = "avatar/" + userId + "/original." + extension;
 
         try (InputStream inputStream = file.getInputStream()) {

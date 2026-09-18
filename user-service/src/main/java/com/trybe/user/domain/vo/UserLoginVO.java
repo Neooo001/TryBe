@@ -22,6 +22,8 @@ public class UserLoginVO {
     private String openid;
     private String bio;
     private Integer gender;
+    /** 角色：USER普通用户/CREATOR创作者/ADMIN运营（网页端凭此决定路由） */
+    private String role;
 
     // ===== 双 Token =====
     /** JWT AccessToken（30min 有效） */

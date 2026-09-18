@@ -18,6 +18,7 @@
         <module>material-service</module>
         <module>body-profile-service</module>
         <module>wardrobe-service</module>
+        <module>creator-service</module>
     </modules>
 
     <parent>

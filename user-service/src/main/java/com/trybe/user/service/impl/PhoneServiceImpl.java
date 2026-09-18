@@ -76,6 +76,8 @@ public class PhoneServiceImpl extends ServiceImpl<UserMapper, User> implements I
                 user.getId(), maskedPhone, accessTtl.getSeconds());
 
         UserLoginVO vo = BeanUtils.copyBean(user, UserLoginVO.class);
+        // 显式回填角色（网页端凭 role 决定入驻引导/创作者后台/运营后台路由）
+        vo.setRole(user.getRole());
         vo.setAccessToken(accessToken);
         vo.setRefreshToken(refreshToken);
         vo.setExpiresIn(accessTtl.getSeconds());

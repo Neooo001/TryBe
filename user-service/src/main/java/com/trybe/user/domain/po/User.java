@@ -54,6 +54,12 @@ public class User implements Serializable {
     private UserStatus status;
 
     /**
+     * 角色：USER普通用户/CREATOR创作者/ADMIN运营
+     * <p>用 VARCHAR+String 存储（不建枚举），规避枚举类型处理器配置风险
+     */
+    private String role;
+
+    /**
      * 微信openid
      */
     private String openid;

@@ -77,9 +77,11 @@ public class WardrobeController {
             @RequestParam(required = false) String wearStatus,
             @ApiParam("关键词，匹配标题/品牌/备注")
             @RequestParam(required = false) String keyword,
+            @ApiParam("多字段排序，格式 field:asc|desc 逗号分隔（如 price:desc,wear_count:desc）。字段白名单：create_time/update_time/price/wear_count/cost_per_wear/purchase_date；非法字段自动忽略并回落默认 create_time DESC")
+            @RequestParam(required = false) String sorts,
             @Valid PageQuery pageQuery) {
         Long userId = UserContext.requireUser();
-        return R.ok(wardrobeService.listWardrobe(userId, source, categoryL1, wearStatus, keyword, pageQuery));
+        return R.ok(wardrobeService.listWardrobe(userId, source, categoryL1, wearStatus, keyword, sorts, pageQuery));
     }
 
     @ApiOperation("衣柜条目详情")

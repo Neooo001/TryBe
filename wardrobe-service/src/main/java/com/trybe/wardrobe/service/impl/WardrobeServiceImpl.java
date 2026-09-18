@@ -31,6 +31,7 @@ import com.trybe.wardrobe.service.WardrobeItemConverter;
 import com.trybe.wardrobe.util.TaobaoImageUtil;
 import com.trybe.wardrobe.util.TaobaoShareParser;
 import com.trybe.wardrobe.util.WardrobeOssPathBuilder;
+import com.trybe.wardrobe.util.WardrobeSortParser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -135,7 +136,7 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
 
     @Override
     public PageDTO<WardrobeItemVO> listWardrobe(Long userId, String source, String categoryL1,
-                                                String wearStatus, String keyword, PageQuery pageQuery) {
+                                                String wearStatus, String keyword, String sorts, PageQuery pageQuery) {
         LambdaQueryWrapper<WardrobeItem> wrapper = new LambdaQueryWrapper<WardrobeItem>()
                 .eq(WardrobeItem::getUserId, userId);
 
@@ -155,7 +156,15 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
                     .or().like(WardrobeItem::getRemark, kw));
         }
 
-        Page<WardrobeItem> page = pageQuery.toMpPageDefaultSortByCreateTimeDesc();
+        // 排序走衣柜自有的白名单解析器（含空值沉底 + id 稳定 tie-breaker），
+        // 有意不再使用 PageQuery.toMpPageDefaultSortByCreateTimeDesc()，以关闭「sortBy 直接当列名」的注入面。
+        // pageNo/pageSize 取自 PageQuery（带默认值），此处再判空兜底，避免手工构造 PageQuery 时 NPE。
+        Integer pageNo = pageQuery == null || pageQuery.getPageNo() == null
+                ? PageQuery.DEFAULT_PAGE_NUM : pageQuery.getPageNo();
+        Integer pageSize = pageQuery == null || pageQuery.getPageSize() == null
+                ? PageQuery.DEFAULT_PAGE_SIZE : pageQuery.getPageSize();
+        Page<WardrobeItem> page = new Page<>(pageNo, pageSize);
+        page.addOrder(WardrobeSortParser.parse(sorts, pageQuery));
         page = baseMapper.selectPage(page, wrapper);
 
         return PageDTO.of(page, item -> converter.toVO(item, findProductById(item.getProductId())));

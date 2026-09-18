@@ -34,9 +34,12 @@ public interface IWardrobeService {
      * @param categoryL1 一级分类筛选，可空
      * @param wearStatus 穿着状态筛选，可空
      * @param keyword    标题/品牌/备注模糊匹配，可空
+     * @param sorts      多字段排序，格式 {@code field:asc|desc} 逗号分隔（如 {@code price:desc,wear_count:desc}）。
+     *                   字段白名单：create_time/update_time/price/wear_count/cost_per_wear/purchase_date；
+     *                   非法字段自动忽略并回落默认 create_time DESC。为空时回落 pageQuery 的 sortBy/isAsc。
      */
     PageDTO<WardrobeItemVO> listWardrobe(Long userId, String source, String categoryL1,
-                                         String wearStatus, String keyword, PageQuery pageQuery);
+                                         String wearStatus, String keyword, String sorts, PageQuery pageQuery);
 
     /**
      * 衣柜详情

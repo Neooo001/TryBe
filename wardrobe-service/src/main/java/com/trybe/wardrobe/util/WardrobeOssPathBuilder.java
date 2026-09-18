@@ -11,7 +11,8 @@ import com.trybe.common.utils.FileTypeUtils;
  * product/images/{bucket}/{num_iid}/detail_{i}.jpg  # 详情图，i 从 1 开始
  *
  * user/{userId}/wardrobe/import/{taskNo}/origin.{ext}  # AI 导入原图（上传即落地）
- * user/{userId}/wardrobe/import/{taskNo}/cutout.jpg    # AI 裁剪结果
+ * user/{userId}/wardrobe/import/{taskNo}/cutout.jpg    # AI 裁剪结果（bbox 矩形裁剪）
+ * user/{userId}/wardrobe/import/{taskNo}/matting.jpg   # AI 抠图结果（像素级去背景 → 白底）
  * user/{userId}/wardrobe/items/{wardrobeId}/cover.jpg  # 条目正式封面（裁剪图归档）
  *
  * user/{userId}/wardrobe/custom/{uuid}.{ext}           # 手动添加
@@ -68,6 +69,26 @@ public final class WardrobeOssPathBuilder {
      */
     public static String importCutout(Long userId, String taskNo) {
         return String.format("user/%d/wardrobe/import/%s/cutout.jpg", userId, taskNo);
+    }
+
+    /**
+     * AI 抠图（去背景 → 白底）结果 objectKey —— 统一 JPEG
+     *
+     * <p>为什么与 {@link #importCutout} 用不同文件名：两者都是「裁剪产物」，
+     * 但「像素级抠图」与「bbox 矩形裁剪」的呈现质量差异很大，前端角标需要如实区分
+     * （已抠图 / AI裁剪）。不额外落库一个 mode 字段，是为了避免给 wardrobe_import_task
+     * 加列——加列若未同步执行 SQL 会让所有导入直接失败，代价远高于收益；
+     * 用「产物文件名」承载该语义，等价信息已经在库（cutout_object_key）里。
+     */
+    public static String importMatting(Long userId, String taskNo) {
+        return String.format("user/%d/wardrobe/import/%s/matting.jpg", userId, taskNo);
+    }
+
+    /**
+     * 判断裁剪产物是否为像素级抠图结果（供前端角标文案区分）
+     */
+    public static boolean isMattingCutout(String objectKey) {
+        return objectKey != null && objectKey.endsWith("/matting.jpg");
     }
 
     /**

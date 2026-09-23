@@ -5,7 +5,7 @@ import lombok.Getter;
 /**
  * 物品试穿模式
  *
- * <p>MODEL / BOTH 需要在提交审核前有「已勾选肖像授权」的模特图。
+ * <p>MODEL / BOTH 需要在发布前有「已勾选肖像授权」的模特图。
  */
 @Getter
 public enum TryonMode {

@@ -17,12 +17,9 @@ public class AdminStatsVO {
     @ApiModelProperty("物品总数")
     private Long totalItems;
 
-    @ApiModelProperty("待审物品数")
-    private Long pendingItems;
+    @ApiModelProperty("已上架物品数")
+    private Long onShelfItems;
 
     @ApiModelProperty("今日新增物品数")
     private Long todayNewItems;
-
-    @ApiModelProperty("今日新增入驻申请数")
-    private Long todayNewApplications;
 }

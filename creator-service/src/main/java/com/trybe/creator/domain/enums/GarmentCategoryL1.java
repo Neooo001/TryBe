@@ -50,7 +50,7 @@ public enum GarmentCategoryL1 {
     }
 
     /**
-     * 宽松解析：无法识别时返回 null（用于审核列表等展示场景，不因脏数据整体失败）
+     * 宽松解析：无法识别时返回 null（用于展示场景，不因脏数据整体失败）
      */
     public static GarmentCategoryL1 of(String value) {
         if (value == null || value.trim().isEmpty()) {

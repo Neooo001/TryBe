@@ -56,7 +56,7 @@ public class CreatorItem implements Serializable {
     /** 价格（元） */
     private BigDecimal price;
 
-    /** 状态：DRAFT/PENDING/APPROVED/REJECTED/ON_SHELF/OFF_SHELF */
+    /** 状态：DRAFT草稿/ON_SHELF已上架/OFF_SHELF已下架 */
     private String status;
 
     /** 试穿模式：FLAT/MODEL/BOTH */
@@ -94,9 +94,6 @@ public class CreatorItem implements Serializable {
 
     /** 演示模特ID（预留字段，v1 不启用，属 tryon-service） */
     private Long demoModelId;
-
-    /** 最近一次驳回原因 */
-    private String rejectReason;
 
     private LocalDateTime createTime;
 

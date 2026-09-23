@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * 物品详情视图对象（I2 / I3 / I4 / R2 出参）
+ * 物品详情视图对象（I2 / I3 / I4 出参）
  */
 @Data
 @ApiModel(description = "物品详情信息")
@@ -36,7 +36,7 @@ public class ItemDetailVO {
     @ApiModelProperty("价格（元）")
     private BigDecimal price;
 
-    @ApiModelProperty("状态")
+    @ApiModelProperty("状态：DRAFT/ON_SHELF/OFF_SHELF")
     private String status;
 
     @ApiModelProperty("试穿模式 FLAT/MODEL/BOTH")
@@ -84,9 +84,6 @@ public class ItemDetailVO {
     @ApiModelProperty("演示模特ID（预留，v1 不启用）")
     private Long demoModelId;
 
-    @ApiModelProperty("最近一次驳回原因")
-    private String rejectReason;
-
     @ApiModelProperty("创建时间")
     private LocalDateTime createTime;
 
@@ -95,7 +92,4 @@ public class ItemDetailVO {
 
     @ApiModelProperty("模特图列表")
     private List<ModelImageVO> modelImages;
-
-    @ApiModelProperty("创作者昵称（R2 审核详情展示）")
-    private String creatorNickname;
 }

@@ -35,7 +35,7 @@ public interface IModelImageService {
     List<ModelImageVO> listMyItemImages(Long creatorId, Long itemId);
 
     /**
-     * 物品模特图列表（内部使用：物品详情/审核详情组装，调用方已做归属校验）
+     * 物品模特图列表（内部使用：物品详情组装，调用方已做归属校验）
      *
      * @param itemId 物品ID
      * @return 模特图列表
@@ -51,7 +51,7 @@ public interface IModelImageService {
     void deleteImage(Long creatorId, Long imageId);
 
     /**
-     * 统计物品下「已勾选肖像授权」的模特图数量（I6 提交审核前置校验使用）
+     * 统计物品下「已勾选肖像授权」的模特图数量（I6 发布前置校验使用）
      *
      * @param itemId 物品ID
      * @return 数量

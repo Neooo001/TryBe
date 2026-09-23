@@ -11,7 +11,7 @@ import com.trybe.creator.domain.vo.CreatorStatsVO;
 public interface IStatsService {
 
     /**
-     * S1 创作者我的看板（按状态统计 + 今日新增）
+     * S1 创作者我的看板（KPI + 类目分布 + 质检通过率 + 发布趋势，一次返回）
      *
      * @param creatorId 创作者用户ID
      * @return 看板数据
@@ -19,7 +19,7 @@ public interface IStatsService {
     CreatorStatsVO creatorOverview(Long creatorId);
 
     /**
-     * S2 运营全局看板
+     * S2 运营全局看板（创作者规模 + 物品规模 + 入驻申请处理情况）
      *
      * @return 看板数据
      */

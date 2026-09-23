@@ -81,11 +81,11 @@ public class ItemController {
         return R.ok();
     }
 
-    @ApiOperation("I6 提交审核")
+    @ApiOperation("I6 发布物品（DRAFT/OFF_SHELF → ON_SHELF）")
     @PostMapping("/{id}/submit")
-    public R<Void> submit(@ApiParam("物品ID") @PathVariable Long id) {
+    public R<Void> publish(@ApiParam("物品ID") @PathVariable Long id) {
         Long creatorId = roleGuard.requireCreator();
-        creatorItemService.submit(creatorId, id);
+        creatorItemService.publish(creatorId, id);
         return R.ok();
     }
 

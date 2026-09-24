@@ -24,6 +24,11 @@ public class SmsService {
     private static final String LIMIT_PREFIX = "sms:limit:";
     private static final long SEND_INTERVAL_SECONDS = 60;
 
+    /** 验证码位数兜底值：4 位（阿里云 dypnsapi 允许 4~8，默认 4） */
+    private static final long DEFAULT_CODE_LENGTH = 4;
+    private static final long MIN_CODE_LENGTH = 4;
+    private static final long MAX_CODE_LENGTH = 8;
+
     private final AsyncClient smsAsyncClient;
     private final SmsProperties smsProperties;
     private final StringRedisTemplate stringRedisTemplate;
@@ -40,6 +45,7 @@ public class SmsService {
                 .templateCode(smsProperties.getTemplateCode())
                 .phoneNumber(phone)
                 .templateParam(smsProperties.getTemplateParam())
+                .codeLength(resolveCodeLength())
                 .build();
 
         try {
@@ -88,6 +94,18 @@ public class SmsService {
             log.error("[SMS] 验证码校验异常 phone={}", maskPhone(phone), e);
             return false;
         }
+    }
+
+    /**
+     * 解析验证码位数：仅接受 4~8，其余（含 null / 越界）一律回落 4 位。
+     * <p>防止 Nacos 误配（如 0 或 10）导致阿里云接口报错或下发超长验证码。
+     */
+    private long resolveCodeLength() {
+        Long configured = smsProperties.getCodeLength();
+        if (configured == null || configured < MIN_CODE_LENGTH || configured > MAX_CODE_LENGTH) {
+            return DEFAULT_CODE_LENGTH;
+        }
+        return configured;
     }
 
     private String maskPhone(String phone) {

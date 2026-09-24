@@ -71,7 +71,6 @@ public class AuthController {
     public R<Void> logout(HttpServletRequest request) {
         Long userId = UserContext.getUser();
         if (userId == null) {
-            // 防御性处理
             return R.error(ErrorCodeEnum.TOKEN_INVALID_RELOGIN, "未登录");
         }
         String accessToken = extractAccessToken(request);

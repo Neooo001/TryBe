@@ -10,6 +10,9 @@ import javax.validation.constraints.Pattern;
 /**
  * 绑定手机号请求
  *
+ * <p>统一账号体系 v2：绑定/换绑 <b>不含图形验证码</b> —— 短信验证码即强凭据
+ * （证明持有 SIM），发码阶段已有「图形码 + 三级限流 + 60s 间隔」三重防护。
+ *
  * @author TryBe Team
  */
 @Data

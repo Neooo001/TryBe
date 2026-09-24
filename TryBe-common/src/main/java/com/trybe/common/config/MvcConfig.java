@@ -21,6 +21,16 @@ public class MvcConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new UserInfoInterceotor())
                 .addPathPatterns("/**")
-                .excludePathPatterns("/users/login", "/users/phone/login", "/auth/refresh-token", "/hi");
+                .excludePathPatterns(
+                        "/users/login",
+                        "/users/phone/login",
+                        "/auth/refresh-token",
+                        "/hi",
+                        // 统一账号体系 v2：/users/auth/** 免鉴权白名单（仅这 4 条）
+                        // 注意：/users/auth/phone/bind 与 /users/auth/phone 必须登录，不得加入
+                        "/users/auth/captcha",
+                        "/users/auth/sms/code",
+                        "/users/auth/login/sms",
+                        "/users/auth/login/password");
     }
 }

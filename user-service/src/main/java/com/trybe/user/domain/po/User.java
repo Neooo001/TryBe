@@ -3,6 +3,7 @@ package com.trybe.user.domain.po;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.trybe.user.enums.PhoneState;
 import com.trybe.user.enums.UserStatus;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -13,8 +14,16 @@ import java.time.LocalDateTime;
 
 /**
  * <p>
- * 用户表
+ * 用户表（统一账号体系 v2：只放「人」的属性）
  * </p>
+ *
+ * <p>凭据与主体分离后，本表不再承载登录凭据：
+ * <ul>
+ *   <li>手机号 → {@code user_identity(identity_type='PHONE')}</li>
+ *   <li>openid → {@code user_identity(identity_type='WECHAT_OPENID', app_id=...)}</li>
+ *   <li>密码   → {@code user_password(user_id)}</li>
+ * </ul>
+ * 本表仅保留：昵称、头像、简介、性别、状态、角色、unionid（预留）、phone_state。
  *
  */
 @Data
@@ -39,16 +48,6 @@ public class User implements Serializable {
     private String avatar;
 
     /**
-     * 密码，加密存储
-     */
-    private String password;
-
-    /**
-     * 注册手机号
-     */
-    private String phone;
-
-    /**
      * 使用状态（0冻结 1正常）
      */
     private UserStatus status;
@@ -60,9 +59,15 @@ public class User implements Serializable {
     private String role;
 
     /**
-     * 微信openid
+     * 微信开放平台 unionid（预留字段，个人主体拿不到，注册开放平台后可启用）
      */
-    private String openid;
+    private String unionid;
+
+    /**
+     * 手机号归属状态：0从未绑定 1已绑定 2曾绑定被释放
+     * <p>小程序据此区分「硬拦截」（NEVER_BOUND）与「软提示」（RELEASED）。
+     */
+    private PhoneState phoneState;
 
     /**
      * 个人介绍
@@ -83,7 +88,4 @@ public class User implements Serializable {
      * 更新时间
      */
     private LocalDateTime updateTime;
-
-
-
 }

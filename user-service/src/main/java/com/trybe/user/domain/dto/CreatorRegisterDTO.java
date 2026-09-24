@@ -34,9 +34,12 @@ public class CreatorRegisterDTO {
     @ApiModelProperty(value = "昵称，留空则使用默认昵称", example = "我的工作室")
     private String nickname;
 
+    /**
+     * 短信验证码：只校验纯数字，不锁定长度（阿里云 {@code CodeLength} 允许 4~8 位）。
+     */
     @NotBlank(message = "短信验证码不能为空")
-    @Pattern(regexp = "^\\d{6}$", message = "短信验证码为 6 位数字")
-    @ApiModelProperty(value = "短信验证码", example = "123456", required = true)
+    @Pattern(regexp = "^\\d{4,8}$", message = "短信验证码格式不正确")
+    @ApiModelProperty(value = "短信验证码（4~8 位数字）", example = "1234", required = true)
     private String code;
 
     @NotBlank(message = "图形验证码标识不能为空")

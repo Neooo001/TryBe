@@ -1,6 +1,7 @@
 package com.trybe.user.domain.vo;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.trybe.user.enums.PhoneState;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -24,6 +25,9 @@ public class UserLoginVO {
     private Integer gender;
     /** 角色：USER普通用户/CREATOR创作者/ADMIN运营（网页端凭此决定路由） */
     private String role;
+
+    /** 手机号归属状态：0从未绑定 1已绑定 2曾绑定被释放（小程序据此区分硬拦截/软提示） */
+    private PhoneState phoneState;
 
     // ===== 双 Token =====
     /** JWT AccessToken（30min 有效） */

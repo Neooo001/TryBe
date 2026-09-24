@@ -1,4 +1,4 @@
-package com.trybe.user.util;
+package com.trybe.common.auth;
 
 import cn.hutool.captcha.CaptchaUtil;
 import cn.hutool.captcha.ShearCaptcha;
@@ -29,6 +29,10 @@ import java.util.concurrent.TimeUnit;
  * </ul>
  *
  * <p>Redis 结构：{@code captcha:{captchaId}} → Hash{code, phone, sent, failCount}，TTL 300s。
+ *
+ * <p><b>模块位置</b>：位于 {@code TryBe-common}，供 user-service 的新旧认证链路共用；
+ * 仅依赖 hutool、Spring Data Redis 与 common 自身的 {@code ErrorCodeEnum}/{@code BizIllegalException}，
+ * 不含任何 {@code com.trybe.user.*} 依赖（避免 common → user-service 反向依赖）。
  *
  * @author TryBe Team
  */
@@ -91,6 +95,7 @@ public class CaptchaStore {
      * 校验图形验证码。
      *
      * <p>失败会累加 {@code failCount}，达到上限后该验证码作废。
+     * 失败统一以 {@link ErrorCodeEnum#CAPTCHA_ERROR}（105）抛出，前端据此自动刷新图形码。
      *
      * @param captchaId   验证码标识
      * @param inputCode   用户输入的验证码
@@ -100,25 +105,25 @@ public class CaptchaStore {
         String key = KEY_PREFIX + captchaId;
         Object storedCode = stringRedisTemplate.opsForHash().get(key, FIELD_CODE);
         if (storedCode == null) {
-            throw new BizIllegalException(ErrorCodeEnum.BIZ_ERROR, "图形验证码已失效，请重新获取");
+            throw new BizIllegalException(ErrorCodeEnum.CAPTCHA_ERROR, "图形验证码已失效，请重新获取");
         }
 
         Object failObj = stringRedisTemplate.opsForHash().get(key, FIELD_FAIL);
         int failCount = failObj == null ? 0 : Integer.parseInt(String.valueOf(failObj));
         if (failCount >= MAX_FAIL_COUNT) {
             stringRedisTemplate.delete(key);
-            throw new BizIllegalException(ErrorCodeEnum.BIZ_ERROR, "图形验证码错误次数过多，请重新获取");
+            throw new BizIllegalException(ErrorCodeEnum.CAPTCHA_ERROR, "图形验证码错误次数过多，请重新获取");
         }
 
         Object boundPhone = stringRedisTemplate.opsForHash().get(key, FIELD_PHONE);
         String bound = boundPhone == null ? "" : String.valueOf(boundPhone);
         if (StrUtil.isNotBlank(bound) && !bound.equals(StrUtil.nullToEmpty(phone))) {
-            throw new BizIllegalException(ErrorCodeEnum.BIZ_ERROR, "图形验证码与手机号不匹配，请重新获取");
+            throw new BizIllegalException(ErrorCodeEnum.CAPTCHA_ERROR, "图形验证码与手机号不匹配，请重新获取");
         }
 
         if (!String.valueOf(storedCode).equalsIgnoreCase(StrUtil.trimToEmpty(inputCode))) {
             stringRedisTemplate.opsForHash().put(key, FIELD_FAIL, String.valueOf(failCount + 1));
-            throw new BizIllegalException(ErrorCodeEnum.BIZ_ERROR, "图形验证码不正确");
+            throw new BizIllegalException(ErrorCodeEnum.CAPTCHA_ERROR, "图形验证码不正确");
         }
     }
 

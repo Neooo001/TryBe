@@ -1,5 +1,6 @@
 package com.trybe.user.controller;
 
+import com.trybe.common.auth.SmsRateLimiter;
 import com.trybe.common.domain.R;
 import com.trybe.common.utils.UserContext;
 import com.trybe.user.domain.dto.CaptchaReqDTO;
@@ -10,7 +11,6 @@ import com.trybe.user.domain.vo.CaptchaVO;
 import com.trybe.user.domain.vo.CreatorLoginVO;
 import com.trybe.user.domain.vo.UserRoleVO;
 import com.trybe.user.service.ICreatorAuthService;
-import com.trybe.user.util.SmsRateLimiter;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;

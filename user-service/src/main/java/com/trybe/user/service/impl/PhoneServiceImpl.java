@@ -3,28 +3,24 @@ package com.trybe.user.service.impl;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.trybe.common.domain.ErrorCodeEnum;
-import com.trybe.common.exception.BizIllegalException;
 import com.trybe.common.exception.UnauthorizedException;
 import com.trybe.common.service.OssService;
-import com.trybe.common.utils.BeanUtils;
-import com.trybe.user.config.JwtProperties;
 import com.trybe.user.domain.po.User;
 import com.trybe.user.domain.vo.UserLoginVO;
 import com.trybe.user.enums.UserStatus;
 import com.trybe.user.mapper.UserMapper;
 import com.trybe.user.service.IPhoneService;
-import com.trybe.user.util.JwtTool;
-import com.trybe.user.util.RefreshTokenUtil;
+import com.trybe.user.service.UserIdentityService;
+import com.trybe.user.support.TokenIssuer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.time.Duration;
 
 /**
- * 手机号管理服务实现
+ * 手机号管理服务实现（兼容端点，统一账号体系 v2）。
+ *
+ * <p>改为走 {@link UserIdentityService}：手机号一律经 {@code user_identity(PHONE)} 解析，
+ * 密码经 {@code user_password} 校验；令牌统一经 {@link TokenIssuer} 下发（修复 P5）。
  *
  * @author TryBe Team
  */
@@ -35,85 +31,73 @@ public class PhoneServiceImpl extends ServiceImpl<UserMapper, User> implements I
 
     private static final String PHONE_MASK_REGEX = "(\\d{3})\\d{4}(\\d{4})";
     private static final String PHONE_MASK_REPLACEMENT = "$1****$2";
+    private static final String CREDENTIAL_ERROR_MSG = "手机号或密码错误";
 
-    private final JwtTool jwtTool;
-    private final JwtProperties jwtProperties;
-    private final RefreshTokenUtil refreshTokenUtil;
+    private final UserIdentityService userIdentityService;
+    private final TokenIssuer tokenIssuer;
     private final OssService ossService;
-    private final PasswordEncoder passwordEncoder;
 
     @Override
     public UserLoginVO loginByPhone(String phone, String password) {
-        User user = lambdaQuery().eq(User::getPhone, phone).one();
-        String maskedPhone = phone.replaceAll(PHONE_MASK_REGEX, PHONE_MASK_REPLACEMENT);
+        String maskedPhone = maskPhone(phone);
 
+        // 「当前持有者 → 历史持有者」优先级 + 密码校验（含恢复路径）
+        Long userId = userIdentityService.resolveUserIdByPhonePassword(phone, password);
+        if (userId == null) {
+            log.warn("[loginByPhone] 登录失败：凭证不匹配 phone={}", maskedPhone);
+            throw new UnauthorizedException(ErrorCodeEnum.AUTH_FAILED, CREDENTIAL_ERROR_MSG);
+        }
+
+        User user = getById(userId);
         if (user == null) {
-            log.warn("[loginByPhone] 手机号未注册 phone={}", maskedPhone);
-            throw new UnauthorizedException(ErrorCodeEnum.AUTH_FAILED, "手机号或密码错误");
+            log.warn("[loginByPhone] 登录失败：用户不存在 userId={} phone={}", userId, maskedPhone);
+            throw new UnauthorizedException(ErrorCodeEnum.AUTH_FAILED, CREDENTIAL_ERROR_MSG);
         }
-
-        if (StrUtil.isBlank(user.getPassword())) {
-            log.warn("[loginByPhone] 用户未设置密码 userId={} phone={}", user.getId(), maskedPhone);
-            throw new UnauthorizedException(ErrorCodeEnum.AUTH_FAILED, "手机号或密码错误");
-        }
-
-        if (!passwordEncoder.matches(password, user.getPassword())) {
-            log.warn("[loginByPhone] 密码错误 userId={} phone={}", user.getId(), maskedPhone);
-            throw new UnauthorizedException(ErrorCodeEnum.AUTH_FAILED, "手机号或密码错误");
-        }
-
         if (user.getStatus() == UserStatus.FROZEN) {
-            log.warn("[loginByPhone] 账号已冻结 userId={} phone={}", user.getId(), maskedPhone);
+            log.warn("[loginByPhone] 账号已冻结 userId={} phone={}", userId, maskedPhone);
             throw new UnauthorizedException(ErrorCodeEnum.ACCOUNT_FROZEN, "账号异常，请联系客服");
         }
 
-        Duration accessTtl = jwtProperties.getAccessTokenTTL();
-        String accessToken = jwtTool.createToken(user.getId(), accessTtl);
-        String refreshToken = refreshTokenUtil.generateToken();
-        refreshTokenUtil.saveToken(refreshToken, user.getId(), user.getOpenid());
+        TokenIssuer.TokenPair token = tokenIssuer.issue(userId, null);
 
-        log.info("[loginByPhone] 登录成功 userId={} phone={} accessTokenExpiresIn={}s",
-                user.getId(), maskedPhone, accessTtl.getSeconds());
-
-        UserLoginVO vo = BeanUtils.copyBean(user, UserLoginVO.class);
-        // 显式回填角色（网页端凭 role 决定入驻引导/创作者后台/运营后台路由）
+        UserLoginVO vo = new UserLoginVO();
+        vo.setUserId(userId);
+        vo.setNickname(user.getNickname());
+        vo.setBio(user.getBio());
+        vo.setGender(user.getGender());
         vo.setRole(user.getRole());
-        vo.setAccessToken(accessToken);
-        vo.setRefreshToken(refreshToken);
-        vo.setExpiresIn(accessTtl.getSeconds());
+        vo.setPhone(userIdentityService.getCurrentPhone(userId));
+        vo.setPhoneState(user.getPhoneState());
+        vo.setAccessToken(token.getAccessToken());
+        vo.setRefreshToken(token.getRefreshToken());
+        vo.setExpiresIn(token.getExpiresIn());
 
         if (StrUtil.isNotBlank(user.getAvatar())) {
             vo.setAvatar(ossService.getPublicUrl(user.getAvatar()));
         }
 
+        log.info("[loginByPhone] 登录成功 userId={} phone={} expiresIn={}s",
+                userId, maskedPhone, token.getExpiresIn());
         return vo;
     }
 
     @Override
-    @Transactional
     public void bind(Long userId, String phone) {
-        User user = getById(userId);
-        if (user == null) {
-            throw new BizIllegalException(ErrorCodeEnum.DATA_NOT_FOUND, "用户不存在");
-        }
-
-        User existUser = lambdaQuery()
-                .eq(User::getPhone, phone)
-                .ne(User::getId, userId)
-                .one();
-        if (existUser != null) {
-            throw new BizIllegalException(ErrorCodeEnum.BIZ_ERROR, "该手机号已被其他账号绑定");
-        }
-
-        user.setPhone(phone);
-        updateById(user);
-
-        String maskedPhone = phone.replaceAll(PHONE_MASK_REGEX, PHONE_MASK_REPLACEMENT);
-        log.info("[bindPhone] 手机号绑定成功 userId={} phone={}", userId, maskedPhone);
+        // 委托事务方法：空闲则绑定，被占用则归属转移
+        userIdentityService.bindOrTransferInTx(userId, phone);
+        log.info("[bindPhone] 手机号绑定成功 userId={} phone={}", userId, maskPhone(phone));
     }
 
     @Override
     public boolean isPhoneBound(String phone) {
-        return lambdaQuery().eq(User::getPhone, phone).count() > 0;
+        return userIdentityService.resolveCurrentPhoneOwner(phone) != null;
+    }
+
+    /** 手机号脱敏：138****8000 */
+    private String maskPhone(String phone) {
+        if (StrUtil.isBlank(phone)) {
+            return "***";
+        }
+        return phone.replaceAll(PHONE_MASK_REGEX, PHONE_MASK_REPLACEMENT);
     }
 }

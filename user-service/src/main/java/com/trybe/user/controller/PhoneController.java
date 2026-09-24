@@ -1,5 +1,6 @@
 package com.trybe.user.controller;
 
+import com.trybe.common.auth.SmsRateLimiter;
 import com.trybe.common.domain.ErrorCodeEnum;
 import com.trybe.common.domain.R;
 import com.trybe.common.utils.UserContext;
@@ -19,6 +20,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import javax.servlet.http.HttpServletRequest;
+
 /**
  * 手机号管理控制器
  *
@@ -35,6 +38,7 @@ public class PhoneController {
 
     private final SmsService smsService;
     private final IPhoneService phoneService;
+    private final SmsRateLimiter smsRateLimiter;
 
     @ApiOperation("手机号密码登录")
     @PostMapping("login")
@@ -45,7 +49,11 @@ public class PhoneController {
 
     @ApiOperation("发送短信验证码")
     @PostMapping("send-code")
-    public R<Void> sendVerifyCode(@RequestBody @Validated SendCodeDTO dto) {
+    public R<Void> sendVerifyCode(@RequestBody @Validated SendCodeDTO dto, HttpServletRequest request) {
+        // legacy 端点保留兼容（不破坏请求契约、不加图形码），但必须复用统一的三级日限流，
+        // 否则它将成为一个绕过 SmsRateLimiter（手机号 10/天、IP 30/天、全局 200/天）的不限量短信入口。
+        String clientIp = SmsRateLimiter.normalizeIp(request.getHeader("X-Forwarded-For"));
+        smsRateLimiter.check(dto.getPhone(), clientIp);
         smsService.sendVerifyCode(dto.getPhone());
         return R.ok();
     }

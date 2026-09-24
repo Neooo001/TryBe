@@ -2,6 +2,7 @@ package com.trybe.user.domain.vo;
 
 import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
+import com.trybe.user.enums.PhoneState;
 import lombok.Data;
 
 /**
@@ -33,6 +34,9 @@ public class CreatorLoginVO {
 
     @ApiModelProperty("角色：CREATOR 创作者 / ADMIN 运营")
     private String role;
+
+    @ApiModelProperty("手机号归属状态：0从未绑定 1已绑定 2曾绑定被释放（前端据此引导补绑）")
+    private PhoneState phoneState;
 
     // ===== 双 Token =====
 

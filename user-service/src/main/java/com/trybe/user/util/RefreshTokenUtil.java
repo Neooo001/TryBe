@@ -23,8 +23,8 @@ import java.util.concurrent.TimeUnit;
  *   <li>单用户最多 {@value #MAX_DEVICE_COUNT} 台设备同时在线，新登录淘汰最早会话</li>
  *   <li>Redis 存储两套 Key：</li>
  *   <ul>
- *     <li>{@code refresh_token:{token}} — Hash 存 userId、openid、createTime，TTL 7 天</li>
- *     <li>{@code user_tokens:{userId}} — Set 存该用户所有 refreshToken，用于多设备管控</li>
+ *     <li>{@code refresh_token:{token}} — Hash 存 userId、openid、realm、createTime，TTL 30 天</li>
+ *     <li>{@code user_tokens:{realm}:{userId}} — Set 存该用户在<b>本域</b>的所有 refreshToken（按域隔离）</li>
  *   </ul>
  * </ul>
  *
@@ -78,9 +78,9 @@ public class RefreshTokenUtil {
      * @param userId       用户ID
      * @param openid       微信 openid（用于审计日志）
      */
-    public void saveToken(String refreshToken, Long userId, String openid) {
+    public void saveToken(String refreshToken, Long userId, String realm, String openid) {
         // 1. 多设备管控：检查当前设备数
-        String userTokensKey = buildUserTokensKey(userId);
+        String userTokensKey = buildUserTokensKey(realm, userId);
         Set<String> existingTokens = stringRedisTemplate.opsForSet().members(userTokensKey);
         if (existingTokens != null && existingTokens.size() >= MAX_DEVICE_COUNT) {
             // 淘汰最早创建的 RefreshToken（按创建时间排序，删除最早的）
@@ -98,7 +98,7 @@ public class RefreshTokenUtil {
                 }
             }
             if (oldestToken != null) {
-                deleteToken(oldestToken, userId);
+                deleteToken(oldestToken, userId, realm);
                 log.info("[RefreshToken] 设备数超限，淘汰最早会话 userId={} oldDeviceMask={}",
                         userId, maskToken(oldestToken));
             }
@@ -109,6 +109,7 @@ public class RefreshTokenUtil {
         String tokenKey = buildTokenKey(refreshToken);
         stringRedisTemplate.opsForHash().put(tokenKey, "userId", String.valueOf(userId));
         stringRedisTemplate.opsForHash().put(tokenKey, "openid", openid);
+        stringRedisTemplate.opsForHash().put(tokenKey, "realm", realm);
         stringRedisTemplate.opsForHash().put(tokenKey, "createTime", String.valueOf(now));
         stringRedisTemplate.expire(tokenKey, REFRESH_TOKEN_TTL_DAYS, TimeUnit.DAYS);
 
@@ -143,6 +144,7 @@ public class RefreshTokenUtil {
         }
 
         String openid = (String) stringRedisTemplate.opsForHash().get(tokenKey, "openid");
+        String realm = (String) stringRedisTemplate.opsForHash().get(tokenKey, "realm");
         String createTimeStr = (String) stringRedisTemplate.opsForHash().get(tokenKey, "createTime");
         long userId = Long.parseLong(userIdStr);
         long createTime = createTimeStr != null ? Long.parseLong(createTimeStr) : 0L;
@@ -150,6 +152,7 @@ public class RefreshTokenUtil {
         TokenPayload payload = new TokenPayload();
         payload.setUserId(userId);
         payload.setOpenid(openid);
+        payload.setRealm(realm);
         payload.setCreateTime(LocalDateTime.ofInstant(
                 Instant.ofEpochMilli(createTime), ZoneId.systemDefault()));
         payload.setRefreshToken(refreshToken);
@@ -179,12 +182,12 @@ public class RefreshTokenUtil {
      * @param refreshToken RefreshToken 字符串
      * @param userId       用户ID（由调用方提供，避免反查 Redis）
      */
-    public void renewToken(String refreshToken, Long userId) {
+    public void renewToken(String refreshToken, Long userId, String realm) {
         if (StrUtil.isBlank(refreshToken)) {
             return;
         }
         String tokenKey = buildTokenKey(refreshToken);
-        String userTokensKey = buildUserTokensKey(userId);
+        String userTokensKey = buildUserTokensKey(realm, userId);
 
         Boolean renewed = stringRedisTemplate.expire(tokenKey, REFRESH_TOKEN_TTL_DAYS, TimeUnit.DAYS);
         if (Boolean.TRUE.equals(renewed)) {
@@ -202,7 +205,7 @@ public class RefreshTokenUtil {
      * @param refreshToken RefreshToken 字符串
      * @param userId       用户ID（用于清理 user_tokens 集合）
      */
-    public void deleteToken(String refreshToken, Long userId) {
+    public void deleteToken(String refreshToken, Long userId, String realm) {
         if (StrUtil.isBlank(refreshToken)) {
             return;
         }
@@ -210,7 +213,7 @@ public class RefreshTokenUtil {
         stringRedisTemplate.delete(tokenKey);
 
         if (userId != null) {
-            stringRedisTemplate.opsForSet().remove(buildUserTokensKey(userId), refreshToken);
+            stringRedisTemplate.opsForSet().remove(buildUserTokensKey(realm, userId), refreshToken);
         }
 
         log.info("[RefreshToken] 已删除单条 token userId={} mask={}", userId, maskToken(refreshToken));
@@ -221,11 +224,11 @@ public class RefreshTokenUtil {
      *
      * @param userId 用户ID
      */
-    public void deleteAllTokens(Long userId) {
+    public void deleteAllTokens(Long userId, String realm) {
         if (userId == null) {
             return;
         }
-        String userTokensKey = buildUserTokensKey(userId);
+        String userTokensKey = buildUserTokensKey(realm, userId);
         Set<String> tokens = stringRedisTemplate.opsForSet().members(userTokensKey);
         if (tokens != null && !tokens.isEmpty()) {
             for (String token : tokens) {
@@ -244,8 +247,15 @@ public class RefreshTokenUtil {
         return REFRESH_TOKEN_PREFIX + refreshToken;
     }
 
-    private String buildUserTokensKey(Long userId) {
-        return USER_TOKENS_PREFIX + userId;
+    /**
+     * 用户 Token 集合 Key — <b>按域隔离</b>
+     *
+     * <p>双账号域拆分后，wx 域与 web 域的 userId 各自独立编号，
+     * 若共用 {@code user_tokens:{userId}}，不仅会互相淘汰会话
+     * （MAX_DEVICE_COUNT=1 时 Web 登录会把小程序踢下线），还可能误删另一域的 token。
+     */
+    private String buildUserTokensKey(String realm, Long userId) {
+        return USER_TOKENS_PREFIX + realm + ":" + userId;
     }
 
     // ==================== 日志工具 ====================
@@ -269,6 +279,8 @@ public class RefreshTokenUtil {
     public static class TokenPayload {
         private Long userId;
         private String openid;
+        /** 账号域（wx / web），刷新时据此重签同域的 access-token */
+        private String realm;
         private LocalDateTime createTime;
         private String refreshToken;
     }

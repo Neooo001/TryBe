@@ -1,6 +1,7 @@
 package com.trybe.user.support;
 
 import cn.hutool.core.util.StrUtil;
+import com.trybe.common.auth.RealmConstants;
 import com.trybe.user.config.JwtProperties;
 import com.trybe.user.util.JwtTool;
 import com.trybe.user.util.RefreshTokenUtil;
@@ -40,21 +41,42 @@ public class TokenIssuer {
      * 签发双令牌。
      *
      * @param userId 用户ID（非空）
+     * @param realm  账号域：{@link RealmConstants#WX} / {@link RealmConstants#WEB}（非空）
      * @param openid 微信 openid，可为 null（Web/手机号登录场景），内部统一转空串
      * @return 令牌对（AccessToken + RefreshToken + 有效期秒数）
      */
-    public TokenPair issue(Long userId, String openid) {
+    public TokenPair issue(Long userId, String realm, String openid) {
         Duration accessTtl = jwtProperties.getAccessTokenTTL();
-        String accessToken = jwtTool.createToken(userId, accessTtl);
+        String accessToken = jwtTool.createToken(userId, realm, accessTtl);
         String refreshToken = refreshTokenUtil.generateToken();
 
         // 关键：Redis Hash 不接受 null，统一 nullToEmpty（修复 P5）
-        refreshTokenUtil.saveToken(refreshToken, userId, StrUtil.nullToEmpty(openid));
+        refreshTokenUtil.saveToken(refreshToken, userId, realm, StrUtil.nullToEmpty(openid));
 
         log.info("[TokenIssuer] 令牌签发成功 userId={} accessTokenExpiresIn={}s refreshTokenMask={}",
                 userId, accessTtl.getSeconds(), RefreshTokenUtil.maskToken(refreshToken));
 
         return new TokenPair(accessToken, refreshToken, accessTtl.getSeconds());
+    }
+
+    /**
+     * 刷新 AccessToken（<b>RefreshToken 不变，滚动续期</b>）。
+     *
+     * <p>新 access-token 的 realm 取自 Redis Hash 中记录的域，
+     * 保证「wx 域的 refreshToken 只能换来 wx 域的 accessToken」——
+     * 这是双账号域拆分后唯一的刷新入口，所有刷新必须经此，避免域丢失。
+     *
+     * @param payload {@link RefreshTokenUtil#validateToken(String)} 的校验结果
+     * @return 新的 access-token
+     */
+    public String refreshAccessToken(RefreshTokenUtil.TokenPayload payload) {
+        Duration accessTtl = jwtProperties.getAccessTokenTTL();
+        String accessToken = jwtTool.createToken(payload.getUserId(), payload.getRealm(), accessTtl);
+        refreshTokenUtil.renewToken(payload.getRefreshToken(), payload.getUserId(), payload.getRealm());
+
+        log.info("[TokenIssuer] 刷新签发成功 userId={} realm={} accessTokenExpiresIn={}s",
+                payload.getUserId(), payload.getRealm(), accessTtl.getSeconds());
+        return accessToken;
     }
 
     /**

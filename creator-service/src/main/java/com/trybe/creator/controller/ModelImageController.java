@@ -1,10 +1,10 @@
 package com.trybe.creator.controller;
 
 import com.trybe.common.domain.R;
+import com.trybe.common.utils.UserContext;
 import com.trybe.creator.domain.dto.ModelImageBindReq;
 import com.trybe.creator.domain.vo.ModelImageVO;
 import com.trybe.creator.service.IModelImageService;
-import com.trybe.creator.util.RoleGuard;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
@@ -35,13 +35,12 @@ import java.util.List;
 public class ModelImageController {
 
     private final IModelImageService modelImageService;
-    private final RoleGuard roleGuard;
 
     @ApiOperation("M1 绑定模特图（需确认肖像授权，落库后同步质检）")
     @PostMapping("/items/{id}/model-images")
     public R<ModelImageVO> bind(@ApiParam("物品ID") @PathVariable Long id,
                                 @RequestBody @Validated ModelImageBindReq req) {
-        Long creatorId = roleGuard.requireCreator();
+        Long creatorId = UserContext.requireUser();
         log.info("[ModelImage] 绑定模特图 itemId={} creatorId={}", id, creatorId);
         return R.ok(modelImageService.bind(creatorId, id, req));
     }
@@ -49,7 +48,7 @@ public class ModelImageController {
     @ApiOperation("M2 模特图列表")
     @GetMapping("/items/{id}/model-images")
     public R<List<ModelImageVO>> listByItem(@ApiParam("物品ID") @PathVariable Long id) {
-        Long creatorId = roleGuard.requireCreator();
+        Long creatorId = UserContext.requireUser();
         // 归属校验下沉到服务层：非本人物品返回 402，避免越权读取模特图
         return R.ok(modelImageService.listMyItemImages(creatorId, id));
     }
@@ -57,7 +56,7 @@ public class ModelImageController {
     @ApiOperation("M3 删除模特图（仅本人）")
     @DeleteMapping("/model-images/{imageId}")
     public R<Void> deleteImage(@ApiParam("模特图ID") @PathVariable Long imageId) {
-        Long creatorId = roleGuard.requireCreator();
+        Long creatorId = UserContext.requireUser();
         log.info("[ModelImage] 删除模特图 imageId={} creatorId={}", imageId, creatorId);
         modelImageService.deleteImage(creatorId, imageId);
         return R.ok();

@@ -2,6 +2,7 @@ package com.trybe.user.service.impl;
 
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.trybe.common.auth.RealmConstants;
 import com.trybe.common.service.OssService;
 import com.trybe.common.utils.BeanUtils;
 import com.trybe.user.config.WechatProperties;
@@ -66,15 +67,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             user = new User().setId(userId);
         }
 
-        // 统一令牌下发（内部 nullToEmpty(openid)，修复 P5）
-        TokenIssuer.TokenPair token = tokenIssuer.issue(userId, openid);
+        // 统一令牌下发（内部 nullToEmpty(openid)，修复 P5）；wx 域
+        TokenIssuer.TokenPair token = tokenIssuer.issue(userId, RealmConstants.WX, openid);
 
         UserLoginVO vo = new UserLoginVO();
         vo.setUserId(userId);
         vo.setNickname(user.getNickname());
         vo.setBio(user.getBio());
         vo.setGender(user.getGender());
-        vo.setRole(user.getRole());
         vo.setOpenid(openid);
         vo.setPhone(userIdentityService.getCurrentPhone(userId));
         vo.setPhoneState(user.getPhoneState());

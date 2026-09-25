@@ -23,14 +23,17 @@ public class MvcConfig implements WebMvcConfigurer {
                 .addPathPatterns("/**")
                 .excludePathPatterns(
                         "/users/login",
-                        "/users/phone/login",
                         "/auth/refresh-token",
                         "/hi",
-                        // 统一账号体系 v2：/users/auth/** 免鉴权白名单（仅这 4 条）
+                        // wx 域（小程序）免鉴权：图形码、发短信码、密码登录
                         // 注意：/users/auth/phone/bind 与 /users/auth/phone 必须登录，不得加入
                         "/users/auth/captcha",
                         "/users/auth/sms/code",
-                        "/users/auth/login/sms",
-                        "/users/auth/login/password");
+                        "/users/auth/login/password",
+                        // web 域（创作者后台）免鉴权：图形码、注册、登录
+                        // 注意：/web/auth/password/change 必须登录，不得加入
+                        "/web/auth/captcha",
+                        "/web/auth/register",
+                        "/web/auth/login");
     }
 }

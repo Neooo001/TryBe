@@ -5,6 +5,7 @@ import cn.hutool.jwt.JWT;
 import cn.hutool.jwt.JWTValidator;
 import cn.hutool.jwt.signers.JWTSigner;
 import cn.hutool.jwt.signers.JWTSignerUtil;
+import com.trybe.common.auth.RealmConstants;
 import com.trybe.common.domain.ErrorCodeEnum;
 import com.trybe.common.exception.UnauthorizedException;
 import org.springframework.stereotype.Component;
@@ -22,15 +23,21 @@ public class JwtTool {
     }
 
     /**
-     * 创建 access-token
-     * @param userId
-     * @param ttl
-     * @return
+     * 创建 access-token（携带账号域标识）
+     *
+     * <p>双账号域拆分后，userId 只在域内唯一（wx 域 1 号与 web 域 1 号是两个人），
+     * 故 token 必须同时携带 realm，由网关按路径校验，防止跨域访问。
+     *
+     * @param userId 用户ID
+     * @param realm  账号域：{@link RealmConstants#WX} / {@link RealmConstants#WEB}
+     * @param ttl    access-token 有效期
+     * @return 签名后的 access-token
      */
-    public String createToken(Long userId, Duration ttl) {
+    public String createToken(Long userId, String realm, Duration ttl) {
         // 1.生成jws
         return JWT.create()
                 .setPayload("user", userId)
+                .setPayload(RealmConstants.CLAIM_REALM, realm)
                 .setExpiresAt(new Date(System.currentTimeMillis() + ttl.toMillis()))
                 .setSigner(jwtSigner)
                 .sign();

@@ -79,20 +79,6 @@ public interface UserIdentityService {
     void bindOrTransferInTx(Long userId, String phone);
 
     /**
-     * 注册手机号账号（纯 DB 事务）：创建 user + PHONE 凭据（可选写入密码）。
-     *
-     * <p>并发场景下另一事务先抢到该手机号时会抛 {@code DuplicateKeyException}，
-     * 事务整体回滚（user 行一并回滚，不留孤儿），由调用方重新解析持有者。
-     *
-     * @param phone       手机号
-     * @param role        角色（USER / CREATOR）
-     * @param nickname    昵称（为空时用默认昵称）
-     * @param rawPassword 明文密码；null 表示不设密码
-     * @return 新建用户ID
-     */
-    Long registerPhoneUserInTx(String phone, String role, String nickname, String rawPassword);
-
-    /**
      * 注册微信账号（纯 DB 事务）：创建 user（phone_state=NEVER_BOUND）+ WECHAT_OPENID 凭据。
      *
      * @param appId  小程序 appid

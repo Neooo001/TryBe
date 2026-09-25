@@ -1,5 +1,6 @@
 package com.trybe.gateway.filters;
 
+import com.trybe.common.auth.RealmConstants;
 import com.trybe.common.domain.ErrorCodeEnum;
 import com.trybe.common.exception.UnauthorizedException;
 import com.trybe.gateway.config.AuthProperties;
@@ -77,9 +78,9 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         }
 
         // 4. 校验 Token（区分过期 vs 非法）
-        Long userId;
+        JwtTool.ParsedToken parsed;
         try {
-            userId = jwtTool.parseTokenWithExpire(token);
+            parsed = jwtTool.parseTokenWithExpire(token);
         } catch (UnauthorizedException e) {
             ErrorCodeEnum errorCode = ErrorCodeEnum.TOKEN_INVALID_RELOGIN; // 兜底
             if (e.getCode() == ErrorCodeEnum.ACCESS_TOKEN_EXPIRE.getCode()) {
@@ -96,13 +97,30 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
                     "登录凭证异常", path, "anonymous", "parse_error");
         }
 
-        // 5. 鉴权通过，传递 user-info
+        Long userId = parsed.getUserId();
+        String realm = parsed.getRealm();
+
+        // 4.5 账号域校验：A 域 token 不得访问 B 域接口
+        //     userId 只在域内唯一（wx 域 1 号 ≠ web 域 1 号），跨域即越权访问他人数据
+        //     realm=any 的路径（/auth/**）为跨域共享，只要求令牌合法，不做域匹配
+        String expectedRealm = matchRealm(path);
+        boolean realmAllowed = expectedRealm != null
+                && (RealmConstants.ANY.equals(expectedRealm) || expectedRealm.equals(realm));
+        if (!realmAllowed) {
+            log.warn("[Auth] 跨域访问被拒 path={} tokenRealm={} expectedRealm={} userId={}",
+                    path, realm, expectedRealm, userId);
+            return writeAuthError(exchange, ErrorCodeEnum.CROSS_REALM_FORBIDDEN,
+                    "无权访问该端接口，请重新登录", path, String.valueOf(userId), "realm_mismatch");
+        }
+
+        // 5. 鉴权通过，传递 user-info + user-realm
         String userInfo = userId.toString();
         ServerWebExchange swe = exchange.mutate()
-                .request(builder -> builder.header("user-info", userInfo))
+                .request(builder -> builder.header("user-info", userInfo)
+                        .header(RealmConstants.HEADER_USER_REALM, realm))
                 .build();
 
-        log.debug("[Auth] 鉴权通过 userId={} path={}", userId, path);
+        log.debug("[Auth] 鉴权通过 userId={} realm={} path={}", userId, realm, path);
         return chain.filter(swe);
     }
 
@@ -138,6 +156,39 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         DataBuffer buffer = response.bufferFactory()
                 .wrap(body.getBytes(StandardCharsets.UTF_8));
         return response.writeWith(Mono.just(buffer));
+    }
+
+    /**
+     * 匹配请求路径所属的账号域
+     *
+     * <p>遍历 {@code hm.auth.realm-paths} 配置（realm → 路径模式列表），
+     * 命中则返回该 realm；未命中任何模式返回 null（由调用方判定为跨域拒绝）。
+     * 命中 {@link RealmConstants#ANY} 表示该路径跨域共享，调用方跳过域相等性校验。
+     *
+     * <p><b>未配置 realm-paths 时的行为</b>：返回 null → 所有已鉴权请求都会被拒。
+     * 这是刻意设计的 fail-closed：宁可拒绝，也不放行无域约束的跨域访问。
+     *
+     * @param path 请求路径
+     * @return 期望的账号域；未命中返回 null
+     */
+    private String matchRealm(String path) {
+        java.util.Map<String, List<String>> realmPaths = authProperties.getRealmPaths();
+        if (realmPaths == null || realmPaths.isEmpty()) {
+            log.error("[Auth] 未配置 hm.auth.realm-paths，拒绝所有鉴权请求 path={}", path);
+            return null;
+        }
+        for (java.util.Map.Entry<String, List<String>> entry : realmPaths.entrySet()) {
+            List<String> patterns = entry.getValue();
+            if (patterns == null) {
+                continue;
+            }
+            for (String pattern : patterns) {
+                if (antPathMatcher.match(pattern, path)) {
+                    return entry.getKey();
+                }
+            }
+        }
+        return null;
     }
 
     private boolean isExclude(String path) {

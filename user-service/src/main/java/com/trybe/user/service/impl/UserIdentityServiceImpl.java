@@ -48,7 +48,6 @@ import java.util.List;
 public class UserIdentityServiceImpl implements UserIdentityService {
 
     private static final String DEFAULT_NICKNAME = "小Try";
-    private static final String ROLE_USER = "USER";
     /** 释放原因：被其他账号抢绑 */
     private static final String RELEASE_REASON_TRANSFERRED = "PHONE_TRANSFERRED";
     /** 转移场景 */
@@ -193,47 +192,14 @@ public class UserIdentityServiceImpl implements UserIdentityService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Long registerPhoneUserInTx(String phone, String role, String nickname, String rawPassword) {
-        String finalRole = StrUtil.isBlank(role) ? ROLE_USER : role;
-        String finalNickname = StrUtil.isBlank(nickname) ? DEFAULT_NICKNAME : nickname;
-        LocalDateTime now = LocalDateTime.now();
-
-        User user = new User()
-                .setNickname(finalNickname)
-                .setStatus(UserStatus.NORMAL)
-                .setRole(finalRole)
-                .setPhoneState(PhoneState.BOUND);
-        userMapper.insert(user);
-
-        // 唯一索引兜底：并发注册时后到者抛 DuplicateKeyException，整个事务回滚（user 一并回滚）
-        userIdentityMapper.insert(new UserIdentity()
-                .setUserId(user.getId())
-                .setIdentityType(IdentityType.PHONE)
-                .setAppId("")
-                .setIdentifier(phone)
-                .setVerified(1)
-                .setVerifiedTime(now));
-
-        if (StrUtil.isNotBlank(rawPassword)) {
-            userPasswordMapper.insert(new UserPassword()
-                    .setUserId(user.getId())
-                    .setPasswordHash(passwordEncoder.encode(rawPassword)));
-        }
-
-        log.info("[registerPhoneUser] 注册成功 userId={} role={} phone={}",
-                user.getId(), finalRole, maskPhone(phone));
-        return user.getId();
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
     public Long registerWechatUserInTx(String appId, String openid) {
         LocalDateTime now = LocalDateTime.now();
         User user = new User()
                 .setNickname(DEFAULT_NICKNAME)
                 .setStatus(UserStatus.NORMAL)
-                .setRole(ROLE_USER)
-                .setPhoneState(PhoneState.NEVER_BOUND);
+                .setPhoneState(PhoneState.NEVER_BOUND)
+                .setCreateTime(now)
+                .setUpdateTime(now);
         userMapper.insert(user);
 
         userIdentityMapper.insert(new UserIdentity()
@@ -242,7 +208,9 @@ public class UserIdentityServiceImpl implements UserIdentityService {
                 .setAppId(StrUtil.nullToEmpty(appId))
                 .setIdentifier(openid)
                 .setVerified(1)
-                .setVerifiedTime(now));
+                .setVerifiedTime(now)
+                .setCreateTime(now)
+                .setUpdateTime(now));
 
         log.info("[registerWechatUser] 微信建号成功 userId={}", user.getId());
         return user.getId();
@@ -272,7 +240,9 @@ public class UserIdentityServiceImpl implements UserIdentityService {
                     .setAppId("")
                     .setIdentifier(phone)
                     .setVerified(1)
-                    .setVerifiedTime(now));
+                    .setVerifiedTime(now)
+                    .setCreateTime(now)
+                    .setUpdateTime(now));
         } catch (DuplicateKeyException e) {
             this.throwPhoneOccupied(phone, "唯一键冲突");
         } catch (DeadlockLoserDataAccessException e) {

@@ -2,12 +2,12 @@ package com.trybe.creator.controller;
 
 import com.trybe.common.domain.PageDTO;
 import com.trybe.common.domain.R;
+import com.trybe.common.utils.UserContext;
 import com.trybe.creator.domain.dto.ItemPageQuery;
 import com.trybe.creator.domain.dto.ItemSaveReq;
 import com.trybe.creator.domain.vo.ItemDetailVO;
 import com.trybe.creator.domain.vo.ItemListVO;
 import com.trybe.creator.service.ICreatorItemService;
-import com.trybe.creator.util.RoleGuard;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
@@ -26,7 +26,8 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 创作者物品控制器（I1~I8）
  *
- * <p>身份一律从 UserContext 取（c罗③：禁止前端传 userId），角色由 RoleGuard 守卫。
+ * <p>身份一律从 UserContext 取（禁止前端传 userId）；
+ * 双账号域拆分后单一角色化，不再由 RoleGuard 校验 CREATOR 身份（域隔离由网关 realm 校验保障）。
  *
  * @author TryBe Team
  */
@@ -39,26 +40,25 @@ import org.springframework.web.bind.annotation.RestController;
 public class ItemController {
 
     private final ICreatorItemService creatorItemService;
-    private final RoleGuard roleGuard;
 
     @ApiOperation("I1 我的物品列表（分页/筛选）")
     @GetMapping
     public R<PageDTO<ItemListVO>> pageMyItems(ItemPageQuery query) {
-        Long creatorId = roleGuard.requireCreator();
+        Long creatorId = UserContext.requireUser();
         return R.ok(creatorItemService.pageMyItems(creatorId, query));
     }
 
     @ApiOperation("I2 物品详情")
     @GetMapping("/{id}")
     public R<ItemDetailVO> getMyItem(@ApiParam("物品ID") @PathVariable Long id) {
-        Long creatorId = roleGuard.requireCreator();
+        Long creatorId = UserContext.requireUser();
         return R.ok(creatorItemService.getMyItem(creatorId, id));
     }
 
     @ApiOperation("I3 新建物品（草稿）")
     @PostMapping
     public R<ItemDetailVO> createItem(@RequestBody @Validated ItemSaveReq req) {
-        Long creatorId = roleGuard.requireCreator();
+        Long creatorId = UserContext.requireUser();
         log.info("[Item] 新建物品 creatorId={}", creatorId);
         return R.ok(creatorItemService.createItem(creatorId, req));
     }
@@ -67,7 +67,7 @@ public class ItemController {
     @PutMapping("/{id}")
     public R<ItemDetailVO> updateItem(@ApiParam("物品ID") @PathVariable Long id,
                                       @RequestBody @Validated ItemSaveReq req) {
-        Long creatorId = roleGuard.requireCreator();
+        Long creatorId = UserContext.requireUser();
         log.info("[Item] 编辑物品 id={} creatorId={}", id, creatorId);
         return R.ok(creatorItemService.updateItem(creatorId, id, req));
     }
@@ -75,7 +75,7 @@ public class ItemController {
     @ApiOperation("I5 删除物品（逻辑删除）")
     @DeleteMapping("/{id}")
     public R<Void> deleteItem(@ApiParam("物品ID") @PathVariable Long id) {
-        Long creatorId = roleGuard.requireCreator();
+        Long creatorId = UserContext.requireUser();
         log.info("[Item] 删除物品 id={} creatorId={}", id, creatorId);
         creatorItemService.deleteItem(creatorId, id);
         return R.ok();
@@ -84,7 +84,7 @@ public class ItemController {
     @ApiOperation("I6 发布物品（DRAFT/OFF_SHELF → ON_SHELF）")
     @PostMapping("/{id}/submit")
     public R<Void> publish(@ApiParam("物品ID") @PathVariable Long id) {
-        Long creatorId = roleGuard.requireCreator();
+        Long creatorId = UserContext.requireUser();
         creatorItemService.publish(creatorId, id);
         return R.ok();
     }
@@ -92,7 +92,7 @@ public class ItemController {
     @ApiOperation("I7 上架")
     @PostMapping("/{id}/on-shelf")
     public R<Void> onShelf(@ApiParam("物品ID") @PathVariable Long id) {
-        Long creatorId = roleGuard.requireCreator();
+        Long creatorId = UserContext.requireUser();
         creatorItemService.onShelf(creatorId, id);
         return R.ok();
     }
@@ -100,7 +100,7 @@ public class ItemController {
     @ApiOperation("I8 下架")
     @PostMapping("/{id}/off-shelf")
     public R<Void> offShelf(@ApiParam("物品ID") @PathVariable Long id) {
-        Long creatorId = roleGuard.requireCreator();
+        Long creatorId = UserContext.requireUser();
         creatorItemService.offShelf(creatorId, id);
         return R.ok();
     }

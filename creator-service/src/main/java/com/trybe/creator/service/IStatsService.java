@@ -1,10 +1,11 @@
 package com.trybe.creator.service;
 
-import com.trybe.creator.domain.vo.AdminStatsVO;
 import com.trybe.creator.domain.vo.CreatorStatsVO;
 
 /**
- * 数据看板服务（S1 创作者 / S2 运营）
+ * 数据看板服务
+ *
+ * <p>单一角色化后仅保留「我的看板」，运营全局看板已下线。
  *
  * @author TryBe Team
  */
@@ -17,11 +18,4 @@ public interface IStatsService {
      * @return 看板数据
      */
     CreatorStatsVO creatorOverview(Long creatorId);
-
-    /**
-     * S2 运营全局看板（创作者规模 + 物品规模 + 入驻申请处理情况）
-     *
-     * @return 看板数据
-     */
-    AdminStatsVO adminOverview();
 }

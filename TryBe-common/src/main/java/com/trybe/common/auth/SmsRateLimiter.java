@@ -14,13 +14,18 @@ import java.time.ZoneId;
 import java.util.Date;
 
 /**
- * 短信发送限流（免鉴权发码接口的第二道防线）
+ * 短信发送限流 —— 频率维度防线，防止验证码被当成短信轰炸工具。
  *
- * <p>第一道防线是图形验证码；本类负责频率维度，防止验证码被当成短信轰炸工具：
+ * <p>两个发码入口共用本类，只是「第一道防线」不同：
  * <ul>
- *   <li>{@code sms:day:phone:{phone}:{yyyyMMdd}} —— 单手机号每日上限 10 条</li>
- *   <li>{@code sms:day:ip:{ip}:{yyyyMMdd}} —— 单 IP 每日上限 30 条</li>
- *   <li>{@code sms:day:global:{yyyyMMdd}} —— 全局熔断 200 条（防止手滑/脚本刷爆短信账单）</li>
+ *   <li>{@code POST /users/auth/sms/code}（免鉴权）—— 第一道防线是<b>图形验证码</b>；</li>
+ *   <li>{@code POST /users/auth/sms/code/authed}（需登录）—— 第一道防线是<b>登录态</b>。</li>
+ * </ul>
+ * 两者频率维度完全一致，都走 {@link #check(String)}。
+ *
+ * <p><b>限流维度：只有手机号一个</b>（刻意不设 IP / 全局 / 用户级）：
+ * <ul>
+ *   <li>{@code sms:day:phone:{phone}:{yyyyMMdd}} —— 单手机号每日上限 <b>100</b> 条</li>
  * </ul>
  *
  * <p>60 秒发送间隔由 {@code SmsService} 内部的 {@code sms:limit:{phone}} 负责，此处不重复实现。
@@ -36,26 +41,19 @@ import java.util.Date;
 public class SmsRateLimiter {
 
     private static final String DAY_PHONE_PREFIX = "sms:day:phone:";
-    private static final String DAY_IP_PREFIX = "sms:day:ip:";
-    private static final String DAY_GLOBAL_PREFIX = "sms:day:global:";
 
-    private static final long MAX_PER_PHONE_PER_DAY = 10L;
-    private static final long MAX_PER_IP_PER_DAY = 30L;
-    private static final long MAX_GLOBAL_PER_DAY = 200L;
+    private static final long MAX_PER_PHONE_PER_DAY = 100L;
 
     private final StringRedisTemplate stringRedisTemplate;
 
     /**
      * 校验发送资格，超限直接抛业务异常。
      *
-     * <p>三个计数器都要自增（而非短路返回），否则攻击者可通过切换手机号绕过 IP 维度统计。
-     * 超限统一以 {@link ErrorCodeEnum#SMS_TOO_FREQUENT}（406）抛出，前端据此展示可读提示。
+     * <p>超限以 {@link ErrorCodeEnum#SMS_TOO_FREQUENT}（406）抛出，前端据此展示可读提示。
      */
-    public void check(String phone, String clientIp) {
+    public void check(String phone) {
         String day = LocalDate.now().format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE);
 
-        checkAndIncr(DAY_GLOBAL_PREFIX + day, MAX_GLOBAL_PER_DAY, "今日验证码发送量已达上限，请明日再试");
-        checkAndIncr(DAY_IP_PREFIX + clientIp + ":" + day, MAX_PER_IP_PER_DAY, "操作过于频繁，请稍后再试");
         checkAndIncr(DAY_PHONE_PREFIX + phone + ":" + day, MAX_PER_PHONE_PER_DAY, "该手机号今日验证码发送已达上限");
     }
 

@@ -7,7 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
- * 短信验证码门面：图形码 → 三级限流 → 发码 → 标记已发。
+ * 短信验证码门面：图形码 → 限流 → 发码 → 标记已发。
  *
  * <p>把「图形码校验 + 频率限流 + 发送 + 标记」这段编排收敛为唯一实现，消除
  * 旧代码 {@code CreatorAuthServiceImpl.sendRegisterCode} 与新 {@code /users/auth/**}
@@ -44,12 +44,12 @@ public class SmsCodeFacade {
      * @param phone       手机号
      * @param captchaId   图形验证码标识
      * @param captchaCode 图形验证码
-     * @param clientIp    客户端 IP（用于 IP 维度限流）
+     * @param clientIp    客户端 IP（仅日志记录）
      * @param scene       使用场景（仅语义标注）
      */
     public void sendCode(String phone, String captchaId, String captchaCode, String clientIp, SmsScene scene) {
-        // 1. 三级日限流（手机号 / IP / 全局）——超限抛 SMS_TOO_FREQUENT(406)
-        smsRateLimiter.check(phone, clientIp);
+        // 1. 手机号日限流——超限抛 SMS_TOO_FREQUENT(406)
+        smsRateLimiter.check(phone);
         // 2. 图形验证码校验——失败抛 CAPTCHA_ERROR(105)
         captchaStore.verify(captchaId, captchaCode, phone);
         // 3. 发码（内含 60 秒间隔，超频抛 406）
@@ -57,11 +57,51 @@ public class SmsCodeFacade {
         // 4. 标记图形码已用于发码
         captchaStore.markSent(captchaId);
         log.info("[sms-code] 验证码已发送 phone={} ip={} scene={}",
-                maskPhone(phone), clientIp, scene != null ? scene.name() : SmsScene.LOGIN.name());
+                maskPhone(phone), clientIp, scene != null ? scene.name() : SmsScene.BIND.name());
     }
 
     /**
-     * 仅校验图形验证码（不消费），供「密码登录」等前置校验复用。
+     * 已登录态发送短信验证码：<b>无图形验证码</b>。
+     *
+     * <p>与 {@link #sendCode} 的区别：免鉴权版靠图形码挡住自动化脚本，本方法改由
+     * <b>登录态</b>承担这一职责（网关 fail-closed，无 token 直接 40102），
+     * 因此编排里没有 {@code captchaStore.verify} 与 {@code markSent}。
+     *
+     * <p>频率防护与免鉴权版完全一致（同一 {@link SmsRateLimiter#check} 实现）：
+     * 手机号 100 条/天 + {@link SmsService} 内置 60 秒间隔。
+     *
+     * @param phone    目标手机号
+     * @param userId   当前登录用户ID（<b>仅日志</b>，不参与限流）
+     * @param clientIp 客户端 IP（<b>仅日志</b>，不参与限流）
+     * @param scene    使用场景（仅语义标注）
+     */
+    public void sendCodeAuthed(String phone, Long userId, String clientIp, SmsScene scene) {
+        // 1. 手机号日限流——超限抛 SMS_TOO_FREQUENT(406)
+        smsRateLimiter.check(phone);
+        // 2. 发码（内含 60 秒间隔，超频抛 406）
+        smsService.sendVerifyCode(phone);
+        log.info("[sms-code] 已登录免图形码发码 phone={} userId={} ip={} scene={}",
+                maskPhone(phone), userId, clientIp, scene != null ? scene.name() : SmsScene.BIND.name());
+    }
+
+    /**
+     * 校验并消费图形验证码（一次性）。
+     *
+     * <p>校验通过后立即删除 Redis 中的验证码，防止同一验证码被复用。
+     * 适用于密码登录、Web 注册等场景：无论后续业务是否成功（如密码错误），
+     * 图形码都是一次性的，用户需重新获取。
+     *
+     * @param captchaId   图形验证码标识
+     * @param captchaCode 图形验证码
+     * @param phone       手机号（与图形码绑定一致性校验）
+     */
+    public void verifyAndConsumeCaptcha(String captchaId, String captchaCode, String phone) {
+        captchaStore.verify(captchaId, captchaCode, phone);
+        captchaStore.consume(captchaId);
+    }
+
+    /**
+     * 仅校验图形验证码（不消费），供「发短信」等需要保留验证码的场景复用。
      *
      * @param captchaId   图形验证码标识
      * @param captchaCode 图形验证码

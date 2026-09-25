@@ -31,7 +31,7 @@ public interface AuthService {
      *
      * <p>操作：
      * <ol>
-     *   <li>删除该用户所有的 RefreshToken（Redis）</li>
+     *   <li>删除该用户<b>本域内</b>所有的 RefreshToken（Redis）</li>
      *   <li>将当前 AccessToken 加入黑名单，TTL = 剩余有效期</li>
      * </ol>
      *
@@ -39,4 +39,13 @@ public interface AuthService {
      * @param accessToken 当前请求的 AccessToken（JWT）
      */
     void logout(Long userId, String accessToken);
+
+    /**
+     * 指定域的登出（供 Web 域改密后强制下线等场景显式指定域使用）
+     *
+     * @param userId      当前用户ID
+     * @param accessToken 当前请求的 AccessToken（JWT）
+     * @param realm       账号域：{@code wx} / {@code web}
+     */
+    void logout(Long userId, String accessToken, String realm);
 }

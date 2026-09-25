@@ -7,7 +7,9 @@ import com.aliyun.sdk.service.dypnsapi20170525.models.CheckSmsVerifyCodeResponse
 import com.aliyun.sdk.service.dypnsapi20170525.models.SendSmsVerifyCodeRequest;
 import com.aliyun.sdk.service.dypnsapi20170525.models.SendSmsVerifyCodeResponse;
 import com.trybe.common.config.SmsProperties;
+import com.trybe.common.domain.ErrorCodeEnum;
 import com.trybe.common.exception.BadRequestException;
+import com.trybe.common.exception.BizIllegalException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -37,7 +39,10 @@ public class SmsService {
         String limitKey = LIMIT_PREFIX + phone;
         if (Boolean.TRUE.equals(stringRedisTemplate.hasKey(limitKey))) {
             Long ttl = stringRedisTemplate.getExpire(limitKey);
-            throw new BadRequestException("操作过于频繁，请" + (ttl != null && ttl > 0 ? ttl : 60) + "秒后再试");
+            // 用 SMS_TOO_FREQUENT(406) 而非 PARAM_ERROR(100)：
+            // 前端只按 406 判定「发送过频」，与手机号日限流的错误码保持一致
+            throw new BizIllegalException(ErrorCodeEnum.SMS_TOO_FREQUENT,
+                    "操作过于频繁，请" + (ttl != null && ttl > 0 ? ttl : SEND_INTERVAL_SECONDS) + "秒后再试");
         }
 
         SendSmsVerifyCodeRequest request = SendSmsVerifyCodeRequest.builder()

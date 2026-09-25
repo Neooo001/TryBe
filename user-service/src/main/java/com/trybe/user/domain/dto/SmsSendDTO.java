@@ -11,8 +11,10 @@ import javax.validation.constraints.Size;
 /**
  * 发送短信验证码请求（/users/auth/sms/code）
  *
- * <p>免鉴权接口，必须带图形验证码；服务端叠加「图形码 + 手机号/IP/全局三级限流 + 60s 间隔」三重防护。
- * {@code scene} 选填，仅用于语义标注。
+ * <p>免鉴权接口，必须带图形验证码；服务端叠加「图形码 + 手机号 100 条/天限流 + 60s 间隔」防护。
+ * {@code scene} 选填，仅用于语义标注（取值见 {@code SmsScene}：BIND / SET_PASSWORD）。
+ *
+ * <p>已登录用户发码请用 {@link SmsSendAuthedDTO}（{@code /users/auth/sms/code/authed}，免图形码）。
  *
  * @author TryBe Team
  */
@@ -34,6 +36,6 @@ public class SmsSendDTO {
     @ApiModelProperty(value = "图形验证码", example = "8k2f", required = true)
     private String captchaCode;
 
-    @ApiModelProperty(value = "使用场景：LOGIN / BIND / REGISTER，选填，缺省 LOGIN", example = "BIND")
+    @ApiModelProperty(value = "使用场景：BIND / SET_PASSWORD，选填，缺省 BIND", example = "BIND")
     private String scene;
 }

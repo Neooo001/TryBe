@@ -23,13 +23,16 @@ import java.time.LocalDateTime;
  *   <li>openid → {@code user_identity(identity_type='WECHAT_OPENID', app_id=...)}</li>
  *   <li>密码   → {@code user_password(user_id)}</li>
  * </ul>
- * 本表仅保留：昵称、头像、简介、性别、状态、角色、unionid（预留）、phone_state。
+ * 本表仅保留：昵称、头像、简介、性别、状态、unionid（预留）、phone_state。
+ *
+ * <p><b>双账号域拆分后</b>：本表归属 wx 域（小程序），表名 {@code wx_user}；
+ * Web 创作者后台账号在 {@code web_user} 表，两域零关联。
  *
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
 @Accessors(chain = true)
-@TableName("user")
+@TableName("wx_user")
 public class User implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -51,12 +54,6 @@ public class User implements Serializable {
      * 使用状态（0冻结 1正常）
      */
     private UserStatus status;
-
-    /**
-     * 角色：USER普通用户/CREATOR创作者/ADMIN运营
-     * <p>用 VARCHAR+String 存储（不建枚举），规避枚举类型处理器配置风险
-     */
-    private String role;
 
     /**
      * 微信开放平台 unionid（预留字段，个人主体拿不到，注册开放平台后可启用）

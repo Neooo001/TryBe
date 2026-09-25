@@ -2,6 +2,7 @@ package com.trybe.user.service.impl;
 
 import cn.hutool.core.util.StrUtil;
 import com.trybe.common.auth.CaptchaStore;
+import com.trybe.common.auth.RealmConstants;
 import com.trybe.common.auth.SmsCodeFacade;
 import com.trybe.common.auth.SmsScene;
 import com.trybe.common.domain.ErrorCodeEnum;
@@ -10,12 +11,12 @@ import com.trybe.common.exception.UnauthorizedException;
 import com.trybe.common.service.OssService;
 import com.trybe.user.domain.dto.BindPhoneDTO;
 import com.trybe.user.domain.dto.PasswordLoginDTO;
-import com.trybe.user.domain.dto.SmsLoginDTO;
+import com.trybe.user.domain.dto.SmsSendAuthedDTO;
 import com.trybe.user.domain.dto.SmsSendDTO;
 import com.trybe.user.domain.po.User;
 import com.trybe.user.domain.vo.CaptchaVO;
-import com.trybe.user.domain.vo.CreatorLoginVO;
 import com.trybe.user.domain.vo.PhoneBindVO;
+import com.trybe.user.domain.vo.UserLoginVO;
 import com.trybe.user.enums.PhoneState;
 import com.trybe.user.enums.UserStatus;
 import com.trybe.user.mapper.UserMapper;
@@ -26,6 +27,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+
+import java.util.regex.Pattern;
 
 /**
  * 统一账号体系认证门面实现。
@@ -41,11 +44,12 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class AuthFacadeServiceImpl implements AuthFacadeService {
 
-    private static final String ROLE_USER = "USER";
     private static final String CREDENTIAL_ERROR_MSG = "手机号或密码错误";
 
     private static final String PHONE_MASK_REGEX = "(\\d{3})\\d{4}(\\d{4})";
     private static final String PHONE_MASK_REPLACEMENT = "$1****$2";
+
+    private static final Pattern PHONE_PATTERN = Pattern.compile("^1[3-9]\\d{9}$");
 
     private final SmsCodeFacade smsCodeFacade;
     private final CaptchaStore captchaStore;
@@ -71,40 +75,36 @@ public class AuthFacadeServiceImpl implements AuthFacadeService {
         smsCodeFacade.sendCode(phone, dto.getCaptchaId(), dto.getCaptchaCode(), clientIp, scene);
     }
 
-    // ==================== A3 短信验证码登录 ====================
+    // ==================== A2b 已登录用户发码（免图形码） ====================
 
     @Override
-    public CreatorLoginVO loginBySms(SmsLoginDTO dto, String clientIp) {
-        String phone = dto.getPhone().trim();
-
-        if (!smsCodeFacade.verifySmsCode(phone, dto.getCode())) {
-            log.warn("[auth] 短信登录失败：验证码错误 phone={} ip={}", maskPhone(phone), clientIp);
-            throw new BizIllegalException(ErrorCodeEnum.BIZ_ERROR, "短信验证码错误或已失效");
+    public void sendSmsCodeForLoginUser(Long userId, SmsSendAuthedDTO dto, String clientIp) {
+        SmsScene scene = SmsScene.of(dto.getScene());
+        String phone;
+        if (scene == SmsScene.SET_PASSWORD) {
+            // 强凭据：只发到该账号当前绑定的号码，绝不接受请求体里的 phone。
+            // 否则会出现「短信发到 A 号、但 /users/password/set 用库里的 B 号校验」的错位。
+            phone = userIdentityService.getCurrentPhone(userId);
+            if (StrUtil.isBlank(phone)) {
+                throw new BizIllegalException(ErrorCodeEnum.NEED_BIND_PHONE, "请先绑定手机号后再操作");
+            }
+        } else {
+            phone = dto.getPhone() == null ? null : dto.getPhone().trim();
+            if (phone == null || !PHONE_PATTERN.matcher(phone).matches()) {
+                throw new BizIllegalException(ErrorCodeEnum.PARAM_ERROR, "请输入正确的手机号");
+            }
         }
-
-        Long userId = userIdentityService.resolveCurrentPhoneOwner(phone);
-        if (userId == null) {
-            // D2：手机号未注册 → 自动注册
-            userId = autoRegisterByPhone(phone);
-            log.info("[auth] 短信登录触发自动注册 userId={} phone={}", userId, maskPhone(phone));
-        }
-
-        User user = requireExistUser(userId);
-        assertNotFrozen(user);
-
-        TokenIssuer.TokenPair token = tokenIssuer.issue(userId, null);
-        log.info("[auth] 短信登录成功 userId={} phone={}", userId, maskPhone(phone));
-        return buildLoginVO(user, token, user.getPhoneState());
+        smsCodeFacade.sendCodeAuthed(phone, userId, clientIp, scene);
     }
 
-    // ==================== A4 密码登录 ====================
+    // ==================== 密码登录（wx 域唯一登录方式） ====================
 
     @Override
-    public CreatorLoginVO loginByPassword(PasswordLoginDTO dto, String clientIp) {
+    public UserLoginVO loginByPassword(PasswordLoginDTO dto, String clientIp) {
         String phone = dto.getPhone().trim();
 
-        // 图形验证码前置校验（P0-5）
-        smsCodeFacade.verifyCaptcha(dto.getCaptchaId(), dto.getCaptchaCode(), phone);
+        // 校验并消费图形验证码（一次性：无论密码对错，图形码不可复用）
+        smsCodeFacade.verifyAndConsumeCaptcha(dto.getCaptchaId(), dto.getCaptchaCode(), phone);
 
         Long matchedUserId = userIdentityService.resolveUserIdByPhonePassword(phone, dto.getPassword());
         if (matchedUserId == null) {
@@ -115,9 +115,6 @@ public class AuthFacadeServiceImpl implements AuthFacadeService {
 
         User user = requireExistUser(matchedUserId);
         assertNotFrozen(user);
-
-        // 登录成功后消费图形码（一次性）
-        smsCodeFacade.consumeCaptcha(dto.getCaptchaId());
 
         // 恢复匹配判定：命中 ≠ 当前持有者 → recovery（说明是用「旧号 + 密码」走恢复路径登录）
         Long currentOwner = userIdentityService.resolveCurrentPhoneOwner(phone);
@@ -130,8 +127,8 @@ public class AuthFacadeServiceImpl implements AuthFacadeService {
                 ? PhoneState.BOUND
                 : (recovery ? PhoneState.RELEASED : user.getPhoneState());
 
-        TokenIssuer.TokenPair token = tokenIssuer.issue(matchedUserId, null);
-        log.info("[auth] 密码登录成功 userId={} phone={} recovery={}", matchedUserId, maskPhone(phone), recovery);
+        TokenIssuer.TokenPair token = tokenIssuer.issue(matchedUserId, RealmConstants.WX, null);
+        log.info("[auth] 密码登录成功(wx域) userId={} phone={} recovery={}", matchedUserId, maskPhone(phone), recovery);
         return buildLoginVO(user, token, phoneState);
     }
 
@@ -161,22 +158,6 @@ public class AuthFacadeServiceImpl implements AuthFacadeService {
 
     // ==================== 私有方法 ====================
 
-    /**
-     * 手机号未注册时自动注册（D2）；并发注册由唯一索引兜底，撞键后重新解析持有者。
-     */
-    private Long autoRegisterByPhone(String phone) {
-        try {
-            return userIdentityService.registerPhoneUserInTx(phone, ROLE_USER, null, null);
-        } catch (DuplicateKeyException e) {
-            Long existing = userIdentityService.resolveCurrentPhoneOwner(phone);
-            if (existing == null) {
-                throw new BizIllegalException(ErrorCodeEnum.PHONE_OCCUPIED, "操作冲突，请稍后重试");
-            }
-            log.info("[auth] 并发注册冲突，收敛到既有账号 userId={}", existing);
-            return existing;
-        }
-    }
-
     private User requireExistUser(Long userId) {
         User user = userMapper.selectById(userId);
         if (user == null) {
@@ -195,11 +176,10 @@ public class AuthFacadeServiceImpl implements AuthFacadeService {
      * 组装登录返回（含双 Token 与 phoneState）。phone 取用户「当前」手机号：
      * 恢复态账号（已被释放）此处为空，与设计 §A.4.4 一致。
      */
-    private CreatorLoginVO buildLoginVO(User user, TokenIssuer.TokenPair token, PhoneState phoneState) {
-        CreatorLoginVO vo = new CreatorLoginVO();
+    private UserLoginVO buildLoginVO(User user, TokenIssuer.TokenPair token, PhoneState phoneState) {
+        UserLoginVO vo = new UserLoginVO();
         vo.setUserId(user.getId());
         vo.setNickname(user.getNickname());
-        vo.setRole(user.getRole());
         vo.setPhone(userIdentityService.getCurrentPhone(user.getId()));
         vo.setPhoneState(phoneState);
         vo.setAccessToken(token.getAccessToken());

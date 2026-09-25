@@ -2,16 +2,19 @@ package com.trybe.user.service;
 
 import com.trybe.user.domain.dto.BindPhoneDTO;
 import com.trybe.user.domain.dto.PasswordLoginDTO;
-import com.trybe.user.domain.dto.SmsLoginDTO;
+import com.trybe.user.domain.dto.SmsSendAuthedDTO;
 import com.trybe.user.domain.dto.SmsSendDTO;
 import com.trybe.user.domain.vo.CaptchaVO;
-import com.trybe.user.domain.vo.CreatorLoginVO;
 import com.trybe.user.domain.vo.PhoneBindVO;
+import com.trybe.user.domain.vo.UserLoginVO;
 
 /**
- * 统一账号体系认证门面 —— {@code /users/auth/**} 的业务编排。
+ * wx 域（小程序）认证门面 —— {@code /users/auth/**} 的业务编排。
  *
- * <p>编排职责：图形码 / 三级限流 / 发码 / 登录（短信 / 密码）/ 绑定手机号。
+ * <p><b>双账号域拆分后</b>：本门面只服务小程序域，签发的令牌 realm=wx；
+ * Web 创作者后台走 {@code /web/auth/**}（web 域，账号表 web_user），两端零关联。
+ *
+ * <p>编排职责：图形码 / 限流 / 发码（免鉴权版 + 登录版）/ 密码登录 / 绑定手机号。
  * 具体凭据解析与归属转移委托给 {@link UserIdentityService}，令牌下发委托给
  * {@code com.trybe.user.support.TokenIssuer}。
  *
@@ -28,7 +31,7 @@ public interface AuthFacadeService {
     CaptchaVO generateCaptcha(String phone);
 
     /**
-     * 发送短信验证码（A2）：图形码 → 三级限流 → 发码 → markSent。
+     * 发送短信验证码（A2，免鉴权）：图形码 → 限流 → 发码 → markSent。
      *
      * @param dto      发码请求（含图形码）
      * @param clientIp 客户端 IP
@@ -36,24 +39,29 @@ public interface AuthFacadeService {
     void sendSmsCode(SmsSendDTO dto, String clientIp);
 
     /**
-     * 短信验证码登录（A3）：校验短信码 → 命中当前持有者 / 未注册自动注册（D2）→ 发令牌。
+     * 已登录用户发送短信验证码（A2b）：<b>无图形码</b>，靠登录态 + 限流防护。
      *
-     * @param dto      登录请求（不含图形码）
+     * <p>场景差异决定 phone 从哪来：
+     * <ul>
+     *   <li>{@code BIND} —— 取请求体 phone（绑定/换绑新号码），并校验格式；</li>
+     *   <li>{@code SET_PASSWORD} —— <b>忽略</b>请求体 phone，固定发到该账号当前已绑定号码，
+     *       未绑定则抛 {@code NEED_BIND_PHONE}(407)。</li>
+     * </ul>
+     *
+     * @param userId   当前登录用户ID
+     * @param dto      发码请求（BIND 需带 phone）
      * @param clientIp 客户端 IP
-     * @return 登录态（含 phoneState）
      */
-    CreatorLoginVO loginBySms(SmsLoginDTO dto, String clientIp);
+    void sendSmsCodeForLoginUser(Long userId, SmsSendAuthedDTO dto, String clientIp);
 
     /**
-     * 密码登录（A4）：图形码校验 → 「当前持有者 → 历史持有者」优先级 + 密码校验 → 发令牌。
-     *
-     * <p>命中 ≠ 当前持有者时判定为「恢复匹配」，返回 {@code phoneState=RELEASED} 供前端引导补绑。
+     * 密码登录（wx 域）：图形码校验 → 匹配当前手机号持有者 + 密码校验 → 发令牌（realm=wx）。
      *
      * @param dto      登录请求（含图形码）
      * @param clientIp 客户端 IP
      * @return 登录态（含 phoneState）
      */
-    CreatorLoginVO loginByPassword(PasswordLoginDTO dto, String clientIp);
+    UserLoginVO loginByPassword(PasswordLoginDTO dto, String clientIp);
 
     /**
      * 绑定手机号（A5，需登录）：校验短信码 → 归属转移事务 → 返回新状态。

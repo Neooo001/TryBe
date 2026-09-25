@@ -1,0 +1,58 @@
+[
+  {
+    "id": "user-service",
+    "uri": "lb://user-service",
+    "predicates": [
+      { "name": "Path", "args": { "pattern": "/users/**" } }
+    ],
+    "filters": []
+  },
+  {
+    "id": "web-auth-service",
+    "uri": "lb://user-service",
+    "predicates": [
+      { "name": "Path", "args": { "pattern": "/web/**" } }
+    ],
+    "filters": []
+  },
+  {
+    "id": "user-auth-service",
+    "uri": "lb://user-service",
+    "predicates": [
+      { "name": "Path", "args": { "pattern": "/auth/**" } }
+    ],
+    "filters": []
+  },
+  {
+    "id": "creator-service",
+    "uri": "lb://creator-service",
+    "predicates": [
+      { "name": "Path", "args": { "pattern": "/creator/**" } }
+    ],
+    "filters": []
+  },
+  {
+    "id": "material-service",
+    "uri": "lb://material-service",
+    "predicates": [
+      { "name": "Path", "args": { "pattern": "/materials/**" } }
+    ],
+    "filters": []
+  },
+  {
+    "id": "body-profile-service",
+    "uri": "lb://body-profile-service",
+    "predicates": [
+      { "name": "Path", "args": { "pattern": "/profiles/**" } }
+    ],
+    "filters": []
+  },
+  {
+    "id": "wardrobe-service",
+    "uri": "lb://wardrobe-service",
+    "predicates": [
+      { "name": "Path", "args": { "pattern": "/wardrobe/**" } }
+    ],
+    "filters": []
+  }
+]

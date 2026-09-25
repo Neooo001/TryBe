@@ -16,15 +16,18 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 密码管理控制器
+ * 密码管理控制器（wx 域）
  *
  * <p>设置/修改密码是登录后的安全操作，接口需要 AccessToken 鉴权。
- * 验证码发送复用 {@code POST /users/phone/send-code} 接口，
+ * 验证码发送走 {@code POST /users/auth/sms/code}（scene = {@code SET_PASSWORD}），
  * 验证码校验基于用户已绑定的手机号，由 Service 层自动获取。
+ *
+ * <p><b>双账号域拆分后</b>：本控制器只服务小程序（{@code wx_user}）；
+ * Web 端改密走 {@code POST /web/auth/password/change}（凭旧密码，不发短信）。
  *
  * @author TryBe Team
  */
-@Api(tags = "密码管理接口")
+@Api(tags = "密码管理接口（wx 域）")
 @RestController
 @RequestMapping("/users/password")
 @RequiredArgsConstructor

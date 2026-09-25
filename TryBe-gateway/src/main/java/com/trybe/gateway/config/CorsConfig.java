@@ -17,7 +17,7 @@ import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
  *
  * <h3>背景</h3>
  * <p>网关此前完全没有 CORS 配置，浏览器在调用跨域接口（例如
- * {@code POST /users/creator/auth/register}）前发出的 <b>OPTIONS 预检请求</b>
+ * {@code POST /web/auth/register}）前发出的 <b>OPTIONS 预检请求</b>
  * 拿不到 {@code Access-Control-Allow-Origin}，导致请求被浏览器直接拦下，服务端日志里甚至看不到请求进入。
  *
  * <h3>为什么使用 CorsWebFilter 而不是 spring.cloud.gateway.globalcors</h3>

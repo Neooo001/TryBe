@@ -3,10 +3,11 @@ package com.trybe.user.service.impl;
 import cn.hutool.core.util.StrUtil;
 import com.trybe.common.domain.ErrorCodeEnum;
 import com.trybe.common.exception.UnauthorizedException;
+import com.trybe.common.utils.UserContext;
 import com.trybe.user.config.JwtProperties;
 import com.trybe.user.domain.vo.UserLoginVO;
 import com.trybe.user.service.AuthService;
-import com.trybe.user.util.JwtTool;
+import com.trybe.user.support.TokenIssuer;
 import com.trybe.user.util.RefreshTokenUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,9 +34,9 @@ public class AuthServiceImpl implements AuthService {
 
     private static final String TOKEN_BLACKLIST_PREFIX = "token_blacklist:";
 
-    private final JwtTool jwtTool;
     private final JwtProperties jwtProperties;
     private final RefreshTokenUtil refreshTokenUtil;
+    private final TokenIssuer tokenIssuer;
     private final StringRedisTemplate stringRedisTemplate;
 
     @Override
@@ -53,15 +54,13 @@ public class AuthServiceImpl implements AuthService {
             throw new UnauthorizedException(ErrorCodeEnum.TOKEN_INVALID_RELOGIN, "RefreshToken 已失效，请重新登录");
         }
 
-        // 2. 生成新的 AccessToken
+        // 2. 生成新的 AccessToken（realm 取自 Redis 中记录的域，保证同域重签）
         Duration accessTtl = jwtProperties.getAccessTokenTTL();
-        String newAccessToken = jwtTool.createToken(payload.getUserId(), accessTtl);
+        String newAccessToken = tokenIssuer.refreshAccessToken(payload);
 
-        // 3. 滚动续期
-        refreshTokenUtil.renewToken(refreshToken, payload.getUserId());
-
-        log.info("[RefreshToken] AccessToken 刷新成功 userId={} refreshMask={} newExpiresIn={}s",
+        log.info("[RefreshToken] AccessToken 刷新成功 userId={} realm={} refreshMask={} newExpiresIn={}s",
                 payload.getUserId(),
+                payload.getRealm(),
                 RefreshTokenUtil.maskToken(refreshToken),
                 accessTtl.getSeconds());
 
@@ -76,13 +75,23 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public void logout(Long userId, String accessToken) {
+        // 域由网关透传的 user-realm header 还原（UserInfoInterceotor 已写入 UserContext）
+        logout(userId, accessToken, UserContext.getRealm());
+    }
+
+    @Override
+    public void logout(Long userId, String accessToken, String realm) {
         if (userId == null) {
             log.warn("[Logout] userId 为空，跳过登出");
             return;
         }
+        if (StrUtil.isBlank(realm)) {
+            log.warn("[Logout] realm 为空，跳过登出（拒绝无域登出以免误删另一域会话）userId={}", userId);
+            return;
+        }
 
-        // 1. 删除用户所有 RefreshToken
-        refreshTokenUtil.deleteAllTokens(userId);
+        // 1. 删除用户本域的所有 RefreshToken
+        refreshTokenUtil.deleteAllTokens(userId, realm);
 
         // 2. AccessToken 加入黑名单（TTL = 剩余有效期）
         if (StrUtil.isNotBlank(accessToken)) {

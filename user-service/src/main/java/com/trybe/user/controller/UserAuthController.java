@@ -6,11 +6,11 @@ import com.trybe.common.utils.UserContext;
 import com.trybe.user.domain.dto.BindPhoneDTO;
 import com.trybe.user.domain.dto.CaptchaReqDTO;
 import com.trybe.user.domain.dto.PasswordLoginDTO;
-import com.trybe.user.domain.dto.SmsLoginDTO;
+import com.trybe.user.domain.dto.SmsSendAuthedDTO;
 import com.trybe.user.domain.dto.SmsSendDTO;
 import com.trybe.user.domain.vo.CaptchaVO;
-import com.trybe.user.domain.vo.CreatorLoginVO;
 import com.trybe.user.domain.vo.PhoneBindVO;
+import com.trybe.user.domain.vo.UserLoginVO;
 import com.trybe.user.service.AuthFacadeService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
@@ -26,24 +26,33 @@ import org.springframework.web.bind.annotation.RestController;
 import javax.servlet.http.HttpServletRequest;
 
 /**
- * 统一账号体系认证控制器 —— {@code /users/auth/**}
+ * 小程序（wx 域）认证控制器 —— {@code /users/auth/**}
  *
- * <p><b>鉴权与白名单（网关 Nacos 与 {@code MvcConfig} 双处同步）</b>：
+ * <p><b>双账号域拆分后</b>：本控制器只服务小程序，表为 {@code wx_user}；
+ * Web 创作者后台走 {@code /web/auth/**}（表 {@code web_user}），两端零交集。
+ * 短信验证码已<b>不再用于登录</b>（原 {@code /users/auth/login/sms} 已删除），
+ * 仅用于「绑定手机号」与「设置密码」两个场景（见 {@code SmsScene}）。
+ *
+ * <p><b>鉴权与白名单（网关本地 yml 与 {@code MvcConfig} 双处同步）</b>：
  * <ul>
- *   <li>免鉴权（4 条）：{@code /users/auth/captcha}、{@code /users/auth/sms/code}、
- *       {@code /users/auth/login/sms}、{@code /users/auth/login/password}</li>
- *   <li>需登录（2 条）：{@code /users/auth/phone/bind}、{@code /users/auth/phone}
- *       —— <b>不得</b>加入白名单</li>
+ *   <li>免鉴权（3 条）：{@code /users/auth/captcha}、{@code /users/auth/sms/code}、
+ *       {@code /users/auth/login/password}</li>
+ *   <li>需登录（3 条）：{@code /users/auth/sms/code/authed}、{@code /users/auth/phone/bind}、
+ *       {@code /users/auth/phone} —— <b>不得</b>加入白名单</li>
  * </ul>
  *
- * <p><b>图形验证码只加在 3 处</b>：A1 captcha、A2 sms/code、A4 login/password；
- * A3 login/sms 不要图形码。
+ * <p>{@code /users/auth/sms/code/authed} 是 A2 的「登录版」：免鉴权版必须带图形码，
+ * 本版改由登录态承担防线，因此<b>绝对不能</b>进白名单 —— 一旦放行就等于开放一个
+ * 免图形码、只受 100 条/天约束的发码入口。
+ *
+ * <p><b>图形验证码只加在 2 处</b>：{@code captcha}、{@code sms/code}、
+ * {@code login/password}（密码登录需防撞库）。
  *
  * <p>登录鉴权统一使用 {@link UserContext#requireUser()}，统一返回 {@link R}&lt;T&gt;，HTTP 一律 200。
  *
  * @author TryBe Team
  */
-@Api(tags = "统一账号体系认证接口")
+@Api(tags = "小程序认证接口（wx 域）")
 @RestController
 @RequestMapping("/users/auth")
 @RequiredArgsConstructor
@@ -61,7 +70,7 @@ public class UserAuthController {
         return R.ok(authFacadeService.generateCaptcha(dto == null ? null : dto.getPhone()));
     }
 
-    @ApiOperation("A2 发送短信验证码（免鉴权，图形码 + 三级限流）")
+    @ApiOperation("A2 发送短信验证码（免鉴权，图形码 + 限流）")
     @PostMapping("/sms/code")
     public R<Void> sendSmsCode(@RequestBody @Validated SmsSendDTO dto, HttpServletRequest request) {
         String clientIp = SmsRateLimiter.normalizeIp(request.getHeader("X-Forwarded-For"));
@@ -70,17 +79,20 @@ public class UserAuthController {
         return R.ok();
     }
 
-    @ApiOperation("A3 短信验证码登录（免鉴权，未注册自动注册）")
-    @PostMapping("/login/sms")
-    public R<CreatorLoginVO> loginBySms(@RequestBody @Validated SmsLoginDTO dto, HttpServletRequest request) {
+    @ApiOperation("A2b 发送短信验证码（需登录，无图形码；用于绑号 / 设置密码）")
+    @PostMapping("/sms/code/authed")
+    public R<Void> sendSmsCodeAuthed(@RequestBody @Validated SmsSendAuthedDTO dto, HttpServletRequest request) {
+        // 网关已强制登录（该路径不在白名单），此处为防御性兜底，防内网直连绕过网关
+        Long userId = UserContext.requireUser();
         String clientIp = SmsRateLimiter.normalizeIp(request.getHeader("X-Forwarded-For"));
-        log.info("短信验证码登录 phone={}", maskPhone(dto.getPhone()));
-        return R.ok(authFacadeService.loginBySms(dto, clientIp));
+        log.info("发送短信验证码(已登录) userId={} scene={}", userId, dto.getScene());
+        authFacadeService.sendSmsCodeForLoginUser(userId, dto, clientIp);
+        return R.ok();
     }
 
-    @ApiOperation("A4 密码登录（免鉴权，图形码前置）")
+    @ApiOperation("密码登录（wx 域，免鉴权，图形码前置）")
     @PostMapping("/login/password")
-    public R<CreatorLoginVO> loginByPassword(@RequestBody @Validated PasswordLoginDTO dto, HttpServletRequest request) {
+    public R<UserLoginVO> loginByPassword(@RequestBody @Validated PasswordLoginDTO dto, HttpServletRequest request) {
         String clientIp = SmsRateLimiter.normalizeIp(request.getHeader("X-Forwarded-For"));
         log.info("密码登录 phone={}", maskPhone(dto.getPhone()));
         return R.ok(authFacadeService.loginByPassword(dto, clientIp));

@@ -6,7 +6,6 @@ import com.trybe.creator.domain.enums.CreatorItemStatus;
 import com.trybe.creator.domain.enums.GarmentCategoryL1;
 import com.trybe.creator.domain.po.CreatorItem;
 import com.trybe.creator.domain.po.CreatorItemModelImage;
-import com.trybe.creator.domain.vo.AdminStatsVO;
 import com.trybe.creator.domain.vo.CategoryStatVO;
 import com.trybe.creator.domain.vo.CreatorStatsVO;
 import com.trybe.creator.domain.vo.PublishTrendVO;
@@ -14,7 +13,6 @@ import com.trybe.creator.domain.vo.QcStatsVO;
 import com.trybe.creator.domain.vo.TrendPointVO;
 import com.trybe.creator.mapper.CreatorItemMapper;
 import com.trybe.creator.mapper.CreatorItemModelImageMapper;
-import com.trybe.creator.mapper.UserReadMapper;
 import com.trybe.creator.service.IStatsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,7 +50,6 @@ public class StatsServiceImpl extends ServiceImpl<CreatorItemMapper, CreatorItem
     /** 趋势窗口天数：近 7 天（由 30 天结果末 7 条切片） */
     private static final int TREND_DAYS_7 = 7;
 
-    private final UserReadMapper userReadMapper;
     private final CreatorItemModelImageMapper modelImageMapper;
 
     /**
@@ -92,22 +89,6 @@ public class StatsServiceImpl extends ServiceImpl<CreatorItemMapper, CreatorItem
         vo.setCategoryStats(buildCategoryStats(creatorId, totalItems));
         vo.setQcStats(buildQcStats(creatorId));
         vo.setPublishTrend(buildPublishTrend(creatorId));
-        return vo;
-    }
-
-    /**
-     * S2 运营全局看板
-     */
-    @Override
-    public AdminStatsVO adminOverview() {
-        LocalDateTime dayStart = LocalDate.now().atStartOfDay();
-        AdminStatsVO vo = new AdminStatsVO();
-        vo.setTotalCreators(safeCountCreators());
-        vo.setTotalItems(countLong(null));
-        vo.setOnShelfItems(countLong(new LambdaQueryWrapper<CreatorItem>()
-                .eq(CreatorItem::getStatus, CreatorItemStatus.ON_SHELF.getCode())));
-        vo.setTodayNewItems(countLong(new LambdaQueryWrapper<CreatorItem>()
-                .ge(CreatorItem::getCreateTime, dayStart)));
         return vo;
     }
 
@@ -240,15 +221,5 @@ public class StatsServiceImpl extends ServiceImpl<CreatorItemMapper, CreatorItem
         return BigDecimal.valueOf(part * 100.0 / total)
                 .setScale(1, RoundingMode.HALF_UP)
                 .doubleValue();
-    }
-
-    private Long safeCountCreators() {
-        try {
-            Long count = userReadMapper.countCreators();
-            return count == null ? 0L : count;
-        } catch (Exception e) {
-            log.warn("[stats] 统计创作者总数失败，降级为 0", e);
-            return 0L;
-        }
     }
 }

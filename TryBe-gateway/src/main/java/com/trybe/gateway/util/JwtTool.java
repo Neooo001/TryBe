@@ -5,21 +5,22 @@ import cn.hutool.jwt.JWT;
 import cn.hutool.jwt.JWTValidator;
 import cn.hutool.jwt.signers.JWTSigner;
 import cn.hutool.jwt.signers.JWTSignerUtil;
+import com.trybe.common.auth.RealmConstants;
 import com.trybe.common.domain.ErrorCodeEnum;
 import com.trybe.common.exception.UnauthorizedException;
 import org.springframework.stereotype.Component;
 
 import java.security.KeyPair;
-import java.time.Duration;
-import java.util.Date;
 
 /**
- * JWT 工具类 — 双 Token 体系
+ * JWT 工具类 — <b>只解析不签发</b>
  *
- * <p>新增 {@link #parseTokenWithExpire(String)} 方法，区分 "过期" 与 "签名错误/格式非法"，
- * 使 Gateway 过滤器可以返回 {@code 40101} vs {@code 40102}，前端据此决策刷新 or 重登。
+ * <p>区分 "过期" 与 "签名错误/格式非法"，使 Gateway 过滤器可以返回
+ * {@code 40101} vs {@code 40102}，前端据此决策刷新 or 重登。
  *
- * <p>旧 {@link #parseToken(String)} 标记为 {@code @Deprecated}，保留兼容。
+ * <p><b>为何删除 createToken</b>：网关与 user-service 曾各持一份签发代码，
+ * 签名/claim 极易漂移。签发职责收归 user-service 的 {@code TokenIssuer}，
+ * 网关只做校验，杜绝双份实现。
  *
  * @author TryBe Team
  */
@@ -31,24 +32,24 @@ public class JwtTool {
         this.jwtSigner = JWTSignerUtil.createSigner("rs256", keyPair);
     }
 
-    // ==================== Token 生成 ====================
+    // ==================== Token 校验（区分过期 vs 非法） ====================
 
     /**
-     * 创建 AccessToken（JWT）
+     * Token 解析结果：用户ID + 账号域
      *
-     * @param userId 用户ID
-     * @param ttl    有效期
-     * @return JWT AccessToken
+     * <p>双账号域拆分后，仅凭 userId 无法定位到人（wx 域 1 号 ≠ web 域 1 号），
+     * 必须与 realm 一起使用。
      */
-    public String createToken(Long userId, Duration ttl) {
-        return JWT.create()
-                .setPayload("user", userId)
-                .setExpiresAt(new Date(System.currentTimeMillis() + ttl.toMillis()))
-                .setSigner(jwtSigner)
-                .sign();
-    }
+    @lombok.Data
+    public static class ParsedToken {
+        private final Long userId;
+        private final String realm;
 
-    // ==================== Token 校验（区分过期 vs 非法） ====================
+        public ParsedToken(Long userId, String realm) {
+            this.userId = userId;
+            this.realm = realm;
+        }
+    }
 
     /**
      * 解析 Token 并区分过期 vs 非法
@@ -56,11 +57,11 @@ public class JwtTool {
      * <p>这是双 Token 体系推荐使用的解析方法。
      *
      * @param token JWT Token 字符串
-     * @return 用户ID
+     * @return 解析结果（用户ID + 账号域）
      * @throws UnauthorizedException(ACCESS_TOKEN_EXPIRE)    — Token 签名正确但已过期 → 前端刷新
      * @throws UnauthorizedException(TOKEN_INVALID_RELOGIN)  — Token 签名错误/格式非法 → 前端重登
      */
-    public Long parseTokenWithExpire(String token) {
+    public ParsedToken parseTokenWithExpire(String token) {
         // 1. 校验是否为空
         if (token == null) {
             throw new UnauthorizedException(ErrorCodeEnum.TOKEN_INVALID_RELOGIN, "未登录");
@@ -91,47 +92,14 @@ public class JwtTool {
             throw new UnauthorizedException(ErrorCodeEnum.TOKEN_INVALID_RELOGIN, "登录凭证无效");
         }
 
-        // 5. 数据解析
+        // 5. 数据解析（userId + realm）
         try {
-            return Long.valueOf(userPayload.toString());
+            Long userId = Long.valueOf(userPayload.toString());
+            Object realmPayload = jwt.getPayload(RealmConstants.CLAIM_REALM);
+            String realm = realmPayload == null ? null : realmPayload.toString();
+            return new ParsedToken(userId, realm);
         } catch (RuntimeException e) {
             throw new UnauthorizedException(ErrorCodeEnum.TOKEN_INVALID_RELOGIN, "登录凭证无效");
-        }
-    }
-
-    // ==================== 旧方法（兼容） ====================
-
-    /**
-     * @deprecated 双 Token 体系下请使用 {@link #parseTokenWithExpire(String)} 以区分过期与非法。
-     * 保留此方法以兼容旧调用方。
-     */
-    @Deprecated
-    public Long parseToken(String token) {
-        if (token == null) {
-            throw new UnauthorizedException("未登录");
-        }
-        JWT jwt;
-        try {
-            jwt = JWT.of(token).setSigner(jwtSigner);
-        } catch (Exception e) {
-            throw new UnauthorizedException("无效的token", e);
-        }
-        if (!jwt.verify()) {
-            throw new UnauthorizedException("无效的token");
-        }
-        try {
-            JWTValidator.of(jwt).validateDate();
-        } catch (ValidateException e) {
-            throw new UnauthorizedException("token已经过期");
-        }
-        Object userPayload = jwt.getPayload("user");
-        if (userPayload == null) {
-            throw new UnauthorizedException("无效的token");
-        }
-        try {
-            return Long.valueOf(userPayload.toString());
-        } catch (RuntimeException e) {
-            throw new UnauthorizedException("无效的token");
         }
     }
 }

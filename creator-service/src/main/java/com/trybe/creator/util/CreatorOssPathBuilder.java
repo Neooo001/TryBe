@@ -11,6 +11,8 @@ import com.trybe.common.utils.FileTypeUtils;
  * creator/{userId}/items/{itemNo}/cutout.png          # 透明底 PNG（试穿素材）
  * creator/{userId}/items/{itemNo}/ref_{uuid}.{ext}    # 参考图
  * creator/{userId}/models/{uuid}.{ext}                # 模特图
+ * creator/{userId}/profile/avatar.{ext}               # 创作者头像（个人中心，覆盖式归档）
+ * creator/{userId}/profile/cover.{ext}                # 创作者主页封面图（个人中心，覆盖式归档）
  * creator/{userId}/tmp/{uuid}.{ext}                   # 预签名先写 tmp，confirm 后 moveObject 归档
  * creator/{userId}/items/pool/origin_{uuid}.{ext}     # 尚未绑定物品的物品图（临时池）
  * </pre>
@@ -70,6 +72,22 @@ public final class CreatorOssPathBuilder {
                 userId, IdUtil.fastSimpleUUID(), FileTypeUtils.normalizeExtension(extension));
     }
 
+    /**
+     * 创作者头像归档位（个人中心；固定文件名覆盖式归档，换头像即覆盖同路径对象）
+     */
+    public static String profileAvatar(Long userId, String extension) {
+        return String.format("creator/%d/profile/avatar.%s",
+                userId, FileTypeUtils.normalizeExtension(extension));
+    }
+
+    /**
+     * 创作者主页封面图归档位（个人中心；固定文件名覆盖式归档）
+     */
+    public static String profileCover(Long userId, String extension) {
+        return String.format("creator/%d/profile/cover.%s",
+                userId, FileTypeUtils.normalizeExtension(extension));
+    }
+
     // ==================== 未绑定物品的临时池 ====================
 
     /**
@@ -109,6 +127,38 @@ public final class CreatorOssPathBuilder {
      */
     public static boolean belongsTo(Long userId, String objectKey) {
         return userId != null && objectKey != null && objectKey.startsWith(prefixOf(userId));
+    }
+
+    /**
+     * 校验 objectKey 是否为该创作者的<b>头像</b>归档位（{@code creator/{userId}/profile/avatar.{ext}}）。
+     * 个人中心更新资料绑定头像时的强校验：头像唯一合法来源是 AVATAR 场景的 P2 确认归档，
+     * 杜绝绑定他人对象、物品图等非头像用途对象。
+     */
+    public static boolean isProfileAvatar(Long userId, String objectKey) {
+        return isProfileImage(userId, objectKey, "avatar");
+    }
+
+    /**
+     * 校验 objectKey 是否为该创作者的<b>主页封面图</b>归档位（{@code creator/{userId}/profile/cover.{ext}}）。
+     * 语义同 {@link #isProfileAvatar(Long, String)}。
+     */
+    public static boolean isProfileCover(Long userId, String objectKey) {
+        return isProfileImage(userId, objectKey, "cover");
+    }
+
+    /**
+     * 精确匹配个人中心图片归档位：key 必须与「前缀 + 文件名 + 白名单扩展名」重写的
+     * 规范路径<b>完全相等</b>，天然拒绝大小写混杂、路径穿越、多余路径段与非图片扩展名
+     */
+    private static boolean isProfileImage(Long userId, String objectKey, String fileName) {
+        if (userId == null || objectKey == null) {
+            return false;
+        }
+        String ext = FileTypeUtils.extensionOf(objectKey);
+        if (!FileTypeUtils.isSupportedImage(ext)) {
+            return false;
+        }
+        return objectKey.equals(String.format("creator/%d/profile/%s.%s", userId, fileName, ext));
     }
 
     /**

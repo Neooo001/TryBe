@@ -28,6 +28,11 @@ import java.io.InputStream;
  * <p>流程：P1 生成 tmp 位预签名 PUT URL → 前端直传 OSS → P2 confirm 校验后 moveObject 归档。
  * <b>本类含 OSS 外部交互，按红线① 不加 @Transactional。</b>
  *
+ * <p><b>多 bucket 约定</b>：头像 / 主页封面图（{@link UploadScene#isProfileImageScene()}）
+ * 走第二 bucket（{@code aliyun.oss.bucket-name2}），其余场景走默认 bucket。
+ * P1 写 tmp、P2 读 tmp、P2 move 归档三处 bucket 必须一致，
+ * 故统一由 {@link #resolveBucket(UploadScene)} 决定，禁止各分支各写一遍。
+ *
  * <p>安全约定：P2 强校验 objectKey 前缀 {@code creator/{userId}/}，
  * 防止构造他人的 objectKey 越权确认/挪动文件。
  *
@@ -46,6 +51,15 @@ public class UploadService {
     private final OssService ossService;
 
     /**
+     * 场景 → 目标 bucket：个人形象类（头像/封面）走第二 bucket，其余走默认 bucket
+     */
+    private String resolveBucket(UploadScene scene) {
+        return scene.isProfileImageScene()
+                ? ossService.secondBucketName()
+                : ossService.defaultBucketName();
+    }
+
+    /**
      * P1 预签名直传
      *
      * @param userId 当前创作者用户ID（来自 UserContext）
@@ -56,10 +70,12 @@ public class UploadService {
         UploadScene scene = UploadScene.strictOf(req.getScene());
         String ext = scene.normalizeExtension(req.getExt());
         String objectKey = CreatorOssPathBuilder.tmp(userId, ext);
+        String bucket = resolveBucket(scene);
         String uploadUrl = ossService.generatePresignedPutUrl(
-                objectKey, PRESIGN_EXPIRE_SECONDS, FileTypeUtils.contentTypeOf(ext));
+                bucket, objectKey, PRESIGN_EXPIRE_SECONDS, FileTypeUtils.contentTypeOf(ext));
         // 日志脱敏：绝不打印预签名 URL
-        log.info("[upload] 预签名生成 userId={} scene={} objectKey={}", userId, scene.getCode(), objectKey);
+        log.info("[upload] 预签名生成 userId={} scene={} bucket={} objectKey={}",
+                userId, scene.getCode(), bucket, objectKey);
         return new PresignVO(objectKey, uploadUrl, PRESIGN_EXPIRE_SECONDS);
     }
 
@@ -72,6 +88,7 @@ public class UploadService {
      */
     public UploadConfirmVO confirm(Long userId, UploadConfirmReq req) {
         UploadScene scene = UploadScene.strictOf(req.getScene());
+        String bucket = resolveBucket(scene);
         String sourceKey = req.getObjectKey();
         if (!CreatorOssPathBuilder.belongsTo(userId, sourceKey)) {
             throw new ForbiddenException(ErrorCodeEnum.FORBIDDEN, "无权访问该文件");
@@ -79,9 +96,10 @@ public class UploadService {
 
         byte[] bytes;
         try {
-            bytes = readAllBytes(sourceKey);
+            bytes = ossService.readObjectBytes(bucket, sourceKey);
         } catch (Exception e) {
-            log.warn("[upload] 读取OSS文件失败 userId={} objectKey={}", userId, sourceKey, e);
+            log.warn("[upload] 读取OSS文件失败 userId={} scene={} bucket={} objectKey={}",
+                    userId, scene.getCode(), bucket, sourceKey, e);
             throw new BadRequestException("文件不存在或尚未上传完成");
         }
         if (bytes.length == 0) {
@@ -103,20 +121,24 @@ public class UploadService {
 
         String targetKey = resolveTargetKey(userId, scene, req.getItemNo(), ext);
         if (!targetKey.equals(sourceKey)) {
-            ossService.moveObject(sourceKey, targetKey);
+            ossService.moveObject(bucket, sourceKey, targetKey);
         }
 
         UploadConfirmVO vo = new UploadConfirmVO();
         vo.setObjectKey(targetKey);
-        vo.setAccessUrl(ossService.generatePresignedUrl(targetKey));
+        // 公共读 bucket（头像/封面所在的第二桶）下发永久 URL，私有 bucket 下发预签名 URL。
+        // 传当前时间戳作版本号：换图是「同 key 覆盖」，URL 不变会被浏览器缓存住，
+        // 前端拿到的预览地址若与旧地址字符串相同，`<img>` 根本不会重新请求。
+        // 预签名 URL 分支会自动忽略该版本号（query 参与签名，追加会 403）。
+        vo.setAccessUrl(ossService.accessUrl(bucket, targetKey, System.currentTimeMillis()));
         vo.setWidth(image.getWidth());
         vo.setHeight(image.getHeight());
         if (scene == UploadScene.ITEM_CUTOUT) {
             // 后端兜底透明底校验（前端已主做）：只提示，不阻断
             vo.setHasAlpha(hasTransparentPixels(image));
         }
-        log.info("[upload] 上传已确认 userId={} scene={} targetKey={} size={}x{}",
-                userId, scene.getCode(), targetKey, image.getWidth(), image.getHeight());
+        log.info("[upload] 上传已确认 userId={} scene={} bucket={} targetKey={} size={}x{}",
+                userId, scene.getCode(), bucket, targetKey, image.getWidth(), image.getHeight());
         return vo;
     }
 
@@ -137,6 +159,10 @@ public class UploadService {
                         : CreatorOssPathBuilder.poolReference(userId, ext);
             case MODEL_IMAGE:
                 return CreatorOssPathBuilder.modelImage(userId, ext);
+            case AVATAR:
+                return CreatorOssPathBuilder.profileAvatar(userId, ext);
+            case COVER:
+                return CreatorOssPathBuilder.profileCover(userId, ext);
             default:
                 throw new BadRequestException("无效的上传场景: " + scene.getCode());
         }

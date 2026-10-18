@@ -19,6 +19,7 @@
         <module>body-profile-service</module>
         <module>wardrobe-service</module>
         <module>creator-service</module>
+        <module>content-service</module>
     </modules>
 
     <parent>

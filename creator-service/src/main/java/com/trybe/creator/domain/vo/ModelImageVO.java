@@ -8,6 +8,10 @@ import java.time.LocalDateTime;
 
 /**
  * 模特图视图对象（M1 / M2 出参，含质检明细与授权记录）
+ *
+ * <p>带出 {@code imageKey}：前端编辑页要让创作者「从已有图片里选一张当主图」，
+ * 就必须能把界面上的某张图对应回 OSS 路径。key 本身不构成访问凭据
+ * （读图走带签名的预签名 URL），所以外露没有额外风险。
  */
 @Data
 @ApiModel(description = "模特图信息")
@@ -15,6 +19,12 @@ public class ModelImageVO {
 
     @ApiModelProperty("模特图ID")
     private Long id;
+
+    @ApiModelProperty("所属物品ID")
+    private Long itemId;
+
+    @ApiModelProperty("模特图 OSS objectKey")
+    private String imageKey;
 
     @ApiModelProperty("模特图预签名访问 URL")
     private String imageUrl;

@@ -81,10 +81,11 @@ public class ItemController {
         return R.ok();
     }
 
-    @ApiOperation("I6 发布物品（DRAFT/OFF_SHELF → ON_SHELF）")
+    @ApiOperation("I6 发布物品（DRAFT/OFF_SHELF → ON_SHELF；发布成功后异步自动解析商品信息）")
     @PostMapping("/{id}/submit")
     public R<Void> publish(@ApiParam("物品ID") @PathVariable Long id) {
         Long creatorId = UserContext.requireUser();
+        log.info("[Item] 发布物品 id={} creatorId={}", id, creatorId);
         creatorItemService.publish(creatorId, id);
         return R.ok();
     }

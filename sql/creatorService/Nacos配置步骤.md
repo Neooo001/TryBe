@@ -3,20 +3,73 @@
 > Nacos 控制台：http://192.168.100.128:8848 （nacos/nacos）
 > 本文件只列配置变更，**不改 gateway 代码**。
 
-## 1. gateway-routes.json（DEFAULT_GROUP）— 改：数组追加两条路由
+## 1. gateway-routes.json（DEFAULT_GROUP）— **整份覆盖，不要手工合并条目**
 
-在现有 RouteDefinition JSON 数组中追加：
+> ⚠️ **两条硬规矩（都踩过坑，务必照做）**
+>
+> **① `pattern` 必须写成裸字符串，绝不能写成 JSON 数组。**
+>
+> 网关的 `DynamicRouteLoader` 用 Hutool 反序列化这份配置，而 Spring Cloud Gateway 的
+> `PredicateDefinition.args` 声明类型是 `Map<String, String>` —— 值是**字符串**，不是列表。
+> Hutool 遇到数组会把它原样转成一个字符串，`pattern` 的值变成字面量
+> `["/users/**","/web/**","/auth/**"]`（**含方括号和引号**）；随后 Spring 的
+> String→List 转换（`StringToCollectionConverter`，按逗号切分）再把这个字符串切成
+> `["/users/**` / `"/web/**"` / `"/auth/**"]` 三段带方括号引号的碎片。
+>
+> 后果：**这条路由永远匹配不上任何请求**。实测结果如下（AntPathMatcher 真实匹配）：
+>
+> | pattern 写法 | 绑定出的规则 | 匹配 `/users/login` |
+> |---|---|---|
+> | `["/users/**","/web/**","/auth/**"]` | `["/users/**` / `"/web/**"` / `"/auth/**"]` | **✗ 未命中** |
+> | `/users/**`（裸字符串） | `/users/**` | ✓ 命中 |
+>
+> 症状：后台登录 `/web/auth/login`、刷新令牌 `/auth/refresh-token`、wx 域 `/users/**`
+> 全部 **404**（路由没注册上，网关直接 404，`AuthGlobalFilter` 甚至不会执行）。
+>
+> **② 一个 `id` 对应一条路径。** 需要多个路径就多写几条路由条目，
+> 不要把 `/users/**`、`/web/**`、`/auth/**` 合并进同一条。
+
+**操作：用 `sql/gateway/gateway-routes.json` 的内容整份覆盖 Nacos 里的这个配置项。**
+
+> 📌 **唯一权威来源就是 `sql/gateway/gateway-routes.json`**，不要再去找别的副本。
+> 原先本目录下曾有一份 `sql/creatorService/gateway-routes.json`，内容**缺 `/web/**` 这一条**
+> （双账号域拆分前的旧版），正是诱使「手工把三条路径合并成一条」的源头，**已删除**。
+> 如需找回：`git checkout 73f3c4d -- sql/creatorService/gateway-routes.json`（但请勿再用它覆盖 Nacos）。
 
 ```json
-{"id":"creator-service","uri":"lb://creator-service","predicates":[{"name":"Path","args":{"pattern":"/creator/**"}}],"filters":[]}
-{"id":"web-auth-service","uri":"lb://user-service","predicates":[{"name":"Path","args":{"pattern":"/web/**"}}],"filters":[]}
+[
+  { "id": "user-service",        "uri": "lb://user-service",        "predicates": [{ "name": "Path", "args": { "pattern": "/users/**" } }],    "filters": [] },
+  { "id": "web-auth-service",    "uri": "lb://user-service",        "predicates": [{ "name": "Path", "args": { "pattern": "/web/**" } }],      "filters": [] },
+  { "id": "user-auth-service",   "uri": "lb://user-service",        "predicates": [{ "name": "Path", "args": { "pattern": "/auth/**" } }],     "filters": [] },
+  { "id": "creator-service",     "uri": "lb://creator-service",     "predicates": [{ "name": "Path", "args": { "pattern": "/creator/**" } }],  "filters": [] },
+  { "id": "material-service",    "uri": "lb://material-service",    "predicates": [{ "name": "Path", "args": { "pattern": "/materials/**" } }], "filters": [] },
+  { "id": "body-profile-service","uri": "lb://body-profile-service","predicates": [{ "name": "Path", "args": { "pattern": "/profiles/**" } }],  "filters": [] },
+  { "id": "wardrobe-service",    "uri": "lb://wardrobe-service",    "predicates": [{ "name": "Path", "args": { "pattern": "/wardrobe/**" } }],  "filters": [] }
+]
 ```
 
-说明：
-- `/creator/**` → creator-service（后台业务）。
-- `/web/**` → user-service（**双账号域拆分后新增**：Web 后台认证 `/web/auth/**`）。
-- `/users/**` 已有到 user-service 的路由（wx 域），无需新增。
-- 完整快照见 `sql/gateway/gateway-routes.json`。
+路径归属：
+
+| 路径 | 目标服务 | 账号域 | 说明 |
+|---|---|---|---|
+| `/users/**` | user-service | wx | 小程序域认证与用户接口 |
+| `/web/**` | user-service | web | **双账号域拆分后新增**：Web 后台认证 `/web/auth/**` |
+| `/auth/**` | user-service | any | 跨域共享：刷新令牌 / 登出 |
+| `/creator/**` | creator-service | web | 创作者后台业务 |
+| `/materials/**` | material-service | wx | 素材库 |
+| `/profiles/**` | body-profile-service | wx | 身材档案 |
+| `/wardrobe/**` | wardrobe-service | wx | 衣橱 |
+
+**验证**（发布后无需重启网关，`DynamicRouteLoader` 监听 Nacos 变更并热更新路由）：
+
+```bash
+# ① 探路由是否注册：返回 404 = 路由没生效；返回业务 JSON（含 code 字段）= 路由已通
+curl -s -o /dev/null -w "web=%{http_code}\n"  "http://localhost:8080/web/auth/captcha"
+curl -s -o /dev/null -w "creator=%{http_code}\n" "http://localhost:8080/creator/items"
+
+# ② 探鉴权是否兜住：未带 token 访问受保护接口，应是 {"code":4010x,...} 而不是 404
+curl -s "http://localhost:8080/creator/items"
+```
 
 ## 2. gateway-dev.yaml — 改：追加 CORS（网页端跨域唯一入口）
 
@@ -150,6 +203,50 @@ aliyun:
 >
 > ⚠️ 公共读桶 + 宽松 CORS 的风险：来源若长期保留 `*`，任意站点都能往你的桶里 PUT。
 > 开发期图方便可以，上线务必换成正式域名。
+
+## 5.1 默认桶 `trybe` 的跨域规则 — **新增（作品图片直传必需）**
+
+> **背景（踩过的坑）**：第 5 节只给 `trybe-avatar` 配了 CORS。创作者后台的「发布作品」会把
+> 作品图按 `MODEL_IMAGE` 场景归档到**默认桶 `trybe`**（`creator/{userId}/models/xxx.jpg`），
+> 而默认桶没有 CORS 规则 → 浏览器 PUT 直传报 `net::ERR_FAILED`。
+>
+> **它不是签名问题**：预签名 URL 只解决「授权写入」。浏览器对 OSS 的 **PUT 请求必然先发 OPTIONS 预检**
+> —— PUT 在任何情况下都不属于 CORS「简单请求」，与是否携带 `Content-Type` 无关。
+> 所以这个坑**无法用代码绕过**（除非改成服务端中转上传），只能在桶上放行。
+
+### 控制台操作
+
+直达链接：
+
+```
+https://oss.console.aliyun.com/bucket/oss-cn-qingdao/trybe/permission/cors
+```
+
+菜单路径：Bucket 列表 → **`trybe`** → 左侧「权限管理 / 权限控制」→「跨域设置」→「创建规则」。
+字段与第 5 节表格**完全一致**（来源 `http://localhost:*` 与 `http://127.0.0.1:*` 分两行添加；
+方法勾 `PUT/GET/HEAD/POST`；允许 Headers 填 `*`；暴露 Headers 填 `ETag`；缓存 `3600`）。
+
+### ossutil（推荐，可复现）
+
+```bash
+# 规则文件见 sql/creatorService/oss-cors-trybe-default.xml
+ossutil cors --method put oss://trybe sql/creatorService/oss-cors-trybe-default.xml
+ossutil cors --method get oss://trybe       # 回读确认
+```
+
+### 验证命令（返回 200 且带 Access-Control-Allow-Origin 即成功）
+
+```bash
+curl -i -X OPTIONS "http://trybe.oss-cn-qingdao.aliyuncs.com/creator/1/tmp/t.png" \
+  -H "Origin: http://127.0.0.1:5173" \
+  -H "Access-Control-Request-Method: PUT" \
+  -H "Access-Control-Request-Headers: content-type"
+```
+
+返回 `403 CORSResponse: CORS is not enabled for this bucket` → 规则没生效，确认配的是 `trybe` 桶
+（很多人会误配到 `trybe-avatar`，因为那份规则文件先存在）。
+
+> 两个桶都要各配一条规则，规则**不跨桶生效**。改完约 1 分钟生效。
 
 ## 6. shared-jdbc.yaml / shared-redis.yaml — 复用不改
 

@@ -1,4 +1,4 @@
-package com.trybe.wardrobe.service.ai;
+package com.trybe.common.ai;
 
 import cn.hutool.core.codec.Base64;
 import cn.hutool.core.util.StrUtil;
@@ -7,28 +7,27 @@ import cn.hutool.http.HttpResponse;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
-import com.trybe.common.exception.BizIllegalException;
 import com.trybe.common.domain.ErrorCodeEnum;
-import com.trybe.wardrobe.config.GarmentAiProperties;
-import com.trybe.wardrobe.domain.dto.GarmentRecognizeResult;
-import com.trybe.wardrobe.domain.enums.GarmentCategoryL1;
+import com.trybe.common.exception.BizIllegalException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 阿里云百炼 Qwen-VL 衣服识别实现
+ * 阿里云百炼 Qwen-VL 衣服识别实现（共用）
  *
  * <p>走百炼的 OpenAI 兼容接口（/compatible-mode/v1/chat/completions），
  * 单次调用同时产出三类结果：
  * <ol>
  *   <li>结构化属性 — 品类、二级品类、颜色、季节、风格、材质、场合、版型、厚薄、保暖度、正式度</li>
  *   <li>主体框 bbox（归一化 0-1）— 供服务端本地裁剪，无需再调用分割 API</li>
- *   <li>AI 生成标题与标签 — 直接用作衣橱条目标题</li>
+ *   <li>AI 生成的标题 / 标签 / 卖点文案 / 建议售价 — 衣橱用作条目标题，创作者用作商品信息</li>
  * </ol>
  *
  * <p>为什么不做 response_format=json_object：不同 Qwen-VL 版本对该参数支持不一致，
@@ -46,13 +45,18 @@ public class QwenVlGarmentRecognizeService implements GarmentRecognizeService {
             "你是服装电商领域的视觉识别专家，擅长从图片中精准定位并描述单件服装商品。"
                     + "你的输出必须是严格的 JSON，不得包含任何解释性文字或 Markdown 代码块标记。";
 
-    /** 提示词模板：把分类字典注入给模型，显著降低自由发挥导致的归类漂移 */
+    /**
+     * 提示词模板：把分类字典注入给模型，显著降低自由发挥导致的归类漂移。
+     *
+     * <p>用 {@link GarmentCategory#promptDict()} 拼装，分类口径只有一份来源；
+     * 后半段的 sellingPoints / suggestedPrice 供创作者商品推广使用，
+     * 衣橱链路不使用这两个字段，多返回几十个 token，不影响其解析。
+     */
     private static final String USER_PROMPT_TEMPLATE =
             "请识别这张图片中【最主要的一件服装】（若出现模特，请忽略人体与背景，只关注那件服装本身）。\n"
                     + "\n"
                     + "【一级分类对应关系，categoryL1 必须从以下代码中选择】\n"
-                    + "TOP=上装, BOTTOM=下装, SET=套装, SHOES=鞋子, BAG=包包, "
-                    + "ACCESSORY=首饰, DECOR=配饰, OTHER=无法判断\n"
+                    + GarmentCategory.promptDict() + "\n"
                     + "【二级分类参考，可自行归纳为最贴近的一个词】\n"
                     + "上装：外套/短袖/卫衣/毛衣/背心/打底；下装：长裤/短裤/长裙/短裙/打底裤；"
                     + "套装：连衣裙/连裤；鞋子：运动鞋/休闲鞋/凉鞋/拖鞋/高跟鞋/靴子/皮鞋\n"
@@ -80,12 +84,16 @@ public class QwenVlGarmentRecognizeService implements GarmentRecognizeService {
                     + "  \"warmth\": 3,\n"
                     + "  \"formality\": 3,\n"
                     + "  \"tags\": [\"基础款\", \"百搭\"],\n"
+                    + "  \"sellingPoints\": \"高腰直筒版型，垂顺不起皱，通勤日常都好搭\",\n"
+                    + "  \"suggestedPrice\": 199,\n"
                     + "  \"confidence\": 0.92,\n"
                     + "  \"bbox\": {\"x1\": 0.180, \"y1\": 0.060, \"x2\": 0.820, \"y2\": 0.980}\n"
                     + "}\n"
                     + "\n"
                     + "约束：seasons 只能取 SPRING/SUMMER/AUTUMN/WINTER 中的值；"
                     + "thickness 只能取 THIN/MEDIUM/THICK；warmth 与 formality 为 1-5 的整数；"
+                    + "sellingPoints 是不超过 40 字的推广短句（不要出现价格、不要编造品牌）；"
+                    + "suggestedPrice 为常见零售价区间内的估算值（单位元，纯数字），无法判断时填 null；"
                     + "confidence 为 0-1 的小数。";
 
     private final GarmentAiProperties properties;
@@ -221,13 +229,10 @@ public class QwenVlGarmentRecognizeService implements GarmentRecognizeService {
         }
 
         GarmentRecognizeResult result = new GarmentRecognizeResult();
-        GarmentCategoryL1 l1 = GarmentCategoryL1.of(obj.getStr("categoryL1"));
-        result.setCategoryL1(l1.getCode());
-        result.setCategoryL1Name(l1.getDesc());
+        result.setCategoryL1(GarmentCategory.of(obj.getStr("categoryL1")).getCode());
 
         String l2 = obj.getStr("categoryL2");
         result.setCategoryL2(StrUtil.isBlank(l2) ? "未分类" : l2.trim());
-        result.setCategoryName(l1.getDesc() + "-" + result.getCategoryL2());
 
         result.setTitle(obj.getStr("title"));
         result.setColor(obj.getStr("color"));
@@ -244,6 +249,8 @@ public class QwenVlGarmentRecognizeService implements GarmentRecognizeService {
         result.setWarmth(clampInt(obj.getInt("warmth"), 1, 5));
         result.setFormality(clampInt(obj.getInt("formality"), 1, 5));
         result.setTags(stringList(obj, "tags"));
+        result.setSellingPoints(truncate(obj.getStr("sellingPoints"), 40));
+        result.setSuggestedPrice(normalizePrice(obj.get("suggestedPrice")));
         result.setConfidence(clampDouble(obj.getDouble("confidence")));
         result.setBbox(parseBbox(obj.getJSONObject("bbox")));
         return result;
@@ -379,6 +386,29 @@ public class QwenVlGarmentRecognizeService implements GarmentRecognizeService {
             hex = "#" + hex;
         }
         return hex.matches("#[0-9a-fA-F]{6}") ? hex.toUpperCase() : null;
+    }
+
+    /**
+     * 建议售价归一：兼容模型返回字符串 "199" / "199元" 或数字；非正数一律按 null 处理
+     */
+    private BigDecimal normalizePrice(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String digits = StrUtil.trimToEmpty(String.valueOf(value)).replaceAll("[^0-9.]", "");
+        if (StrUtil.isBlank(digits)) {
+            return null;
+        }
+        try {
+            BigDecimal price = new BigDecimal(digits).setScale(2, RoundingMode.HALF_UP);
+            return price.signum() > 0 ? price : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private String truncate(String value, int maxLength) {
+        return StrUtil.isBlank(value) ? null : StrUtil.maxLength(value.trim(), maxLength);
     }
 
     private Integer clampInt(Integer value, int min, int max) {

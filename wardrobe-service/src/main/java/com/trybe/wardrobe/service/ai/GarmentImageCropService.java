@@ -1,7 +1,7 @@
 package com.trybe.wardrobe.service.ai;
 
+import com.trybe.common.ai.GarmentRecognizeResult;
 import com.trybe.common.utils.ImageUtils;
-import com.trybe.wardrobe.domain.dto.GarmentRecognizeResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -95,38 +95,12 @@ public class GarmentImageCropService {
     /**
      * 送模型前压缩：超过 maxBytes 时按比例逐级缩小并降低 JPEG 质量
      *
-     * <p>原因：图片以 base64 内联进请求体，体积会膨胀约 33%，
-     * 原图 8MB 会产出 11MB 请求体，既慢又容易触发网关/模型体积上限。
-     * 长边压到 1280 以内对识别精度几乎无影响（模型内部也会做缩放）。
+     * <p>实现已收敛到 {@link ImageUtils#compressForModel(byte[], int)}，两个服务的压缩档位
+     * （1280 → 1024 → 800）只维护一份。本方法保留为「衣橱导入链路」的语义入口。
      *
      * @return 压缩后的字节；无法压缩或已足够小则返回原图
      */
     public byte[] compressForModel(byte[] originBytes, int maxBytes) {
-        if (originBytes == null || originBytes.length <= maxBytes) {
-            return originBytes;
-        }
-        try {
-            BufferedImage source = ImageUtils.read(originBytes);
-            if (source == null) {
-                return originBytes;
-            }
-            // 逐级降档：先缩到长边 1280，仍超标再缩到 1024
-            for (int maxSide : new int[]{1280, 1024}) {
-                byte[] bytes = ImageUtils.writeJpeg(ImageUtils.resizeToMaxSide(source, maxSide));
-                if (bytes.length <= maxBytes) {
-                    log.info("[GarmentCrop] 送模型前压缩 {} -> {} bytes (maxSide={})",
-                            originBytes.length, bytes.length, maxSide);
-                    return bytes;
-                }
-            }
-            byte[] bytes = ImageUtils.writeJpeg(ImageUtils.resizeToMaxSide(source, 800));
-            log.info("[GarmentCrop] 送模型前压缩 {} -> {} bytes (maxSide=800)",
-                    originBytes.length, bytes.length);
-            // 极端情况下压缩反而变大（如原图本身已是高质量小 JPEG），此时用原图
-            return bytes.length < originBytes.length ? bytes : originBytes;
-        } catch (Exception e) {
-            log.warn("[GarmentCrop] 压缩失败，使用原图", e);
-            return originBytes;
-        }
+        return ImageUtils.compressForModel(originBytes, maxBytes);
     }
 }

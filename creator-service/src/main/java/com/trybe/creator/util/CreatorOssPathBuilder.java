@@ -7,10 +7,11 @@ import com.trybe.common.utils.FileTypeUtils;
  * 创作者 OSS 目录路径构造工具（红线④：所有 OSS 路径必须走本类，禁止手拼字符串）
  *
  * <pre>
+ * creator/{userId}/items/{itemId}/model_{uuid}.{ext}   # 作品图片（模特上身图，绑定时归位）
  * creator/{userId}/items/{itemNo}/origin.{ext}        # 物品主图原图
  * creator/{userId}/items/{itemNo}/cutout.png          # 透明底 PNG（试穿素材）
  * creator/{userId}/items/{itemNo}/ref_{uuid}.{ext}    # 参考图
- * creator/{userId}/models/{uuid}.{ext}                # 模特图
+ * creator/{userId}/models/{uuid}.{ext}                # 模特图（尚未绑定作品的暂存池）
  * creator/{userId}/profile/avatar.{ext}               # 创作者头像（个人中心，覆盖式归档）
  * creator/{userId}/profile/cover.{ext}                # 创作者主页封面图（个人中心，覆盖式归档）
  * creator/{userId}/tmp/{uuid}.{ext}                   # 预签名先写 tmp，confirm 后 moveObject 归档
@@ -22,6 +23,9 @@ import com.trybe.common.utils.FileTypeUtils;
  *   <li>创作者维度隔离 —— 一级前缀 creator/{userId}，按人批量清理与越权防护（P2 强校验该前缀）</li>
  *   <li>业务维度分层 —— 二级前缀 items / models / tmp</li>
  *   <li>归属于具体物品的图片用 itemNo 建目录 —— 物品删除时可整目录清理</li>
+ *   <li><b>作品图片按作品 id 归位</b> —— 上传时物品尚未创建，先落 models/ 暂存池，
+ *       绑定（{@code POST /creator/items/{itemId}/model-images}）时 move 到
+ *       {@code creator/{userId}/items/{itemId}/}，一个作品一个目录，可整目录清理</li>
  * </ul>
  */
 public final class CreatorOssPathBuilder {
@@ -65,11 +69,42 @@ public final class CreatorOssPathBuilder {
     }
 
     /**
-     * 模特图归档位（模特图不挂在某个 itemNo 下：一张模特图可服务于多个配搭场景）
+     * 模特图归档位（<b>尚未绑定作品</b>的暂存池：上传时作品 id 还不存在，
+     * 绑定时由 {@link #itemModelImage(Long, Long, String)} 归位到作品目录）
      */
     public static String modelImage(Long userId, String extension) {
         return String.format("creator/%d/models/%s.%s",
                 userId, IdUtil.fastSimpleUUID(), FileTypeUtils.normalizeExtension(extension));
+    }
+
+    // ==================== 作品专属目录（按作品 id） ====================
+
+    /**
+     * 某个作品的专属目录前缀，如 {@code creator/7/items/123/}
+     *
+     * <p>作品 id 是数据库自增主键，纯数字；与业务编号 itemNo（CI 前缀）不同层语义，但同处 items/ 下，
+     * 二者不可能撞名（一个是纯数字、一个是 CI+日期+序列）。
+     */
+    public static String itemPrefixOf(Long userId, Long itemId) {
+        return String.format("creator/%d/items/%d/", userId, itemId);
+    }
+
+    /**
+     * 作品图片（模特上身图）归位后的正式路径：{@code creator/{userId}/items/{itemId}/model_{uuid}.{ext}}
+     *
+     * <p>之所以带 uuid 后缀：一个作品有 1 或 4 张图，同目录内必须互不覆盖。
+     */
+    public static String itemModelImage(Long userId, Long itemId, String extension) {
+        return String.format("creator/%d/items/%d/model_%s.%s",
+                userId, itemId, IdUtil.fastSimpleUUID(), FileTypeUtils.normalizeExtension(extension));
+    }
+
+    /**
+     * objectKey 是否已经在该作品的专属目录下（已归位则不必重复 move）
+     */
+    public static boolean isUnderItem(Long userId, Long itemId, String objectKey) {
+        return userId != null && itemId != null && objectKey != null
+                && objectKey.startsWith(itemPrefixOf(userId, itemId));
     }
 
     /**

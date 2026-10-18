@@ -4,6 +4,7 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.trybe.common.exception.BadRequestException;
 import com.trybe.common.exception.BizIllegalException;
 import com.trybe.common.exception.ForbiddenException;
@@ -13,6 +14,7 @@ import com.trybe.common.service.FaceDetectService;
 import com.trybe.common.service.OssService;
 import com.trybe.common.utils.BeanUtils;
 import com.trybe.common.utils.CollUtils;
+import com.trybe.common.utils.FileTypeUtils;
 import com.trybe.common.utils.ImageUtils;
 import com.trybe.creator.domain.dto.ModelImageBindReq;
 import com.trybe.creator.domain.enums.QcStatus;
@@ -78,10 +80,14 @@ public class ModelImageServiceImpl extends ServiceImpl<CreatorItemModelImageMapp
             throw new BadRequestException("请先确认肖像授权声明");
         }
 
+        // 归位到作品专属目录：creator/{userId}/items/{itemId}/model_{uuid}.{ext}
+        // 上传时作品还没创建，图片先躺在 models/ 暂存池；绑定是每张图的必经之路，在这里收口
+        String archivedKey = archiveToItemDir(creatorId, itemId, req.getImageKey());
+
         CreatorItemModelImage image = new CreatorItemModelImage()
                 .setItemId(itemId)
                 .setCreatorId(creatorId)
-                .setImageKey(req.getImageKey())
+                .setImageKey(archivedKey)
                 .setSortOrder(req.getSortOrder() == null ? 0 : req.getSortOrder())
                 .setAuthConfirmed(1)
                 .setAuthVersion(req.getAuthVersion())
@@ -136,6 +142,57 @@ public class ModelImageServiceImpl extends ServiceImpl<CreatorItemModelImageMapp
         return count(new LambdaQueryWrapper<CreatorItemModelImage>()
                 .eq(CreatorItemModelImage::getItemId, itemId)
                 .eq(CreatorItemModelImage::getAuthConfirmed, 1));
+    }
+
+    // ==================== 私有：作品目录归位 ====================
+
+    /**
+     * 把图片搬进作品专属目录 {@code creator/{userId}/items/{itemId}/}。
+     *
+     * <p><b>为什么不在上传时直接写作品目录</b>：发布流程是「先传图 → 再创建作品 → 再绑定」，
+     * 传图那一刻作品 id 还不存在（草稿也是这一步建的）。绑定是每张图的必经入口，
+     * 因此在这里归位是唯一收口点，且对前端完全透明。
+     *
+     * <p><b>降级约定</b>：move 失败（OSS 抖动 / 权限）不阻断绑定 —— 沿用原路径，
+     * 图片照常可访问，只是没归位。归位是目录治理，不是业务功能，不能让它拖垮发布。
+     *
+     * @return 归位后的 objectKey（失败时为原 key）
+     */
+    private String archiveToItemDir(Long creatorId, Long itemId, String sourceKey) {
+        if (CreatorOssPathBuilder.isUnderItem(creatorId, itemId, sourceKey)) {
+            return sourceKey;
+        }
+        String targetKey = CreatorOssPathBuilder.itemModelImage(
+                creatorId, itemId, FileTypeUtils.extensionOf(sourceKey));
+        try {
+            ossService.moveObject(sourceKey, targetKey);
+        } catch (Exception e) {
+            log.warn("[modelImage] 图片归位失败，沿用原路径 itemId={} sourceKey={}", itemId, sourceKey, e);
+            return sourceKey;
+        }
+        syncMainImage(creatorId, itemId, sourceKey, targetKey);
+        log.info("[modelImage] 图片已归位 itemId={} targetKey={}", itemId, targetKey);
+        return targetKey;
+    }
+
+    /**
+     * 同步作品主图：主图是在创建作品时从这批图里挑的一张，归位后必须跟着改，
+     * 否则 {@code creator_item.image_key} 会指向已被 move 走的旧路径。
+     *
+     * <p>用 <b>条件更新</b>（WHERE image_key = 旧值）而不是先查后写：发布时多张图并发绑定，
+     * 先查后写会把别人的结果覆盖掉；带旧值条件后，只有「当前主图正好是这一张」的更新才生效。
+     */
+    private void syncMainImage(Long creatorId, Long itemId, String oldKey, String newKey) {
+        try {
+            creatorItemMapper.update(null, new LambdaUpdateWrapper<CreatorItem>()
+                    .eq(CreatorItem::getId, itemId)
+                    .eq(CreatorItem::getCreatorId, creatorId)
+                    .eq(CreatorItem::getImageKey, oldKey)
+                    .set(CreatorItem::getImageKey, newKey));
+        } catch (Exception e) {
+            // 主图同步失败只影响目录规整，不影响图片展示（旧路径此时已失效需重新绑定，故记 ERROR）
+            log.error("[modelImage] 主图同步失败 itemId={} oldKey={} newKey={}", itemId, oldKey, newKey, e);
+        }
     }
 
     // ==================== 私有：质检 ====================

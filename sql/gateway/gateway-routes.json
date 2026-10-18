@@ -54,5 +54,13 @@
       { "name": "Path", "args": { "pattern": "/wardrobe/**" } }
     ],
     "filters": []
+  },
+  {
+    "id": "content-service",
+    "uri": "lb://content-service",
+    "predicates": [
+      { "name": "Path", "args": { "pattern": "/community/**" } }
+    ],
+    "filters": []
   }
 ]

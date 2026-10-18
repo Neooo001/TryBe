@@ -110,4 +110,46 @@ public final class ImageUtils {
         }
         return Math.min(v, max);
     }
+
+    /**
+     * 送视觉大模型前压缩：超过 maxBytes 时按比例逐级缩小
+     *
+     * <p>原因：图片以 base64 内联进请求体，体积会膨胀约 33%，
+     * 原图 8MB 会产出 11MB 请求体，既慢又容易触发网关/模型体积上限。
+     * 长边压到 1280 以内对识别精度几乎无影响（模型内部也会做缩放）。
+     *
+     * <p>所有服务（衣橱导入、创作者商品发布）共用本方法，避免各写一份档位。
+     *
+     * @param originBytes 原图字节
+     * @param maxBytes    允许的最大字节数
+     * @return 压缩后的字节；无法压缩、压缩后反而更大、或已足够小则返回原图
+     */
+    public static byte[] compressForModel(byte[] originBytes, int maxBytes) {
+        if (originBytes == null || originBytes.length <= maxBytes) {
+            return originBytes;
+        }
+        try {
+            BufferedImage source = read(originBytes);
+            if (source == null) {
+                return originBytes;
+            }
+            // 逐级降档：先缩到长边 1280，仍超标再缩到 1024
+            for (int maxSide : new int[]{1280, 1024}) {
+                byte[] bytes = writeJpeg(resizeToMaxSide(source, maxSide));
+                if (bytes.length <= maxBytes) {
+                    log.info("[ImageUtils] 送模型前压缩 {} -> {} bytes (maxSide={})",
+                            originBytes.length, bytes.length, maxSide);
+                    return bytes;
+                }
+            }
+            byte[] bytes = writeJpeg(resizeToMaxSide(source, 800));
+            log.info("[ImageUtils] 送模型前压缩 {} -> {} bytes (maxSide=800)",
+                    originBytes.length, bytes.length);
+            // 极端情况下压缩反而变大（如原图本身已是高质量小 JPEG），此时用原图
+            return bytes.length < originBytes.length ? bytes : originBytes;
+        } catch (Exception e) {
+            log.warn("[ImageUtils] 压缩失败，使用原图", e);
+            return originBytes;
+        }
+    }
 }

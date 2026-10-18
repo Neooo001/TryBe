@@ -1,17 +1,22 @@
-package com.trybe.wardrobe.domain.dto;
+package com.trybe.common.ai;
 
 import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
 import lombok.Data;
 
 import java.io.Serializable;
+import java.math.BigDecimal;
 import java.util.List;
 
 /**
- * 衣服识别大模型返回结果
+ * 衣服识别大模型返回结果（共用 DTO）
  *
- * <p>对应提示词中约定的 JSON 结构，字段命名与 {@code wardrobe_item} 列一一映射，
- * 便于直接落库而无需额外转换层。
+ * <p>对应提示词中约定的 JSON 结构。字段刻意覆盖两类下游：
+ * <ul>
+ *   <li><b>衣橱</b>（wardrobe-service）—— 品类、颜色、季节、风格、材质、场合、版型、厚薄、保暖度、正式度；</li>
+ *   <li><b>创作者商品</b>（creator-service）—— 商品标题、卖点文案、建议售价、图案/风格标签。</li>
+ * </ul>
+ * 各下游只取自己关心的字段，未用到的字段留空即可。
  */
 @Data
 @ApiModel(description = "衣服AI识别结果")
@@ -22,14 +27,8 @@ public class GarmentRecognizeResult implements Serializable {
     @ApiModelProperty("一级分类码：TOP/BOTTOM/SET/SHOES/BAG/ACCESSORY/DECOR/OTHER")
     private String categoryL1;
 
-    @ApiModelProperty("一级分类中文名")
-    private String categoryL1Name;
-
     @ApiModelProperty("二级分类，如 长裤")
     private String categoryL2;
-
-    @ApiModelProperty("分类全称，如 下装-长裤")
-    private String categoryName;
 
     @ApiModelProperty("AI 生成的标题，如 灰色直筒休闲长裤")
     private String title;
@@ -76,6 +75,12 @@ public class GarmentRecognizeResult implements Serializable {
     @ApiModelProperty("标签")
     private List<String> tags;
 
+    @ApiModelProperty("推广卖点文案（不超过 40 字，供创作者商品宣传使用）")
+    private String sellingPoints;
+
+    @ApiModelProperty("建议零售价（元），模型无法判断时为 null")
+    private BigDecimal suggestedPrice;
+
     @ApiModelProperty("识别置信度 0-1")
     private Double confidence;
 
@@ -89,7 +94,7 @@ public class GarmentRecognizeResult implements Serializable {
      * 归一化主体框
      */
     @Data
-    @ApiModel("归一化包围框")
+    @ApiModel(description = "归一化包围框")
     public static class Bbox implements Serializable {
 
         private static final long serialVersionUID = 1L;

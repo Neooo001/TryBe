@@ -4,7 +4,7 @@ package com.trybe.wardrobe.service.ai;
  * 衣服抠图服务抽象（像素级去背景 → 白底留白）
  *
  * <p>当前唯一实现为 {@link AliyunImageSegMattingService}（阿里云分割抠图的商品分割接口）。
- * 抽象出接口的目的与 {@link GarmentRecognizeService} 一致：让供应商可替换，
+ * 抽象出接口的目的与 {@link com.trybe.common.ai.GarmentRecognizeService} 一致：让供应商可替换，
  * 且让编排层（{@code WardrobeImportProcessor}）只依赖「能不能抠出一张图」这一语义，
  * 切换火山/自研抠图时业务层零改动。
  *

@@ -19,18 +19,21 @@ import com.trybe.creator.domain.dto.ItemSaveReq;
 import com.trybe.creator.domain.enums.CreatorItemStatus;
 import com.trybe.creator.domain.enums.GarmentCategoryL1;
 import com.trybe.creator.domain.enums.TryonMode;
+import com.trybe.creator.domain.event.ItemPublishedEvent;
 import com.trybe.creator.domain.po.CreatorItem;
 import com.trybe.creator.domain.vo.ItemDetailVO;
 import com.trybe.creator.domain.vo.ItemListVO;
+import com.trybe.creator.domain.vo.ModelImageVO;
 import com.trybe.creator.mapper.CreatorItemMapper;
 import com.trybe.creator.service.ICreatorItemService;
 import com.trybe.creator.service.IModelImageService;
+import com.trybe.creator.util.CreatorOssPathBuilder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -54,6 +57,7 @@ public class CreatorItemServiceImpl extends ServiceImpl<CreatorItemMapper, Creat
     private final ItemNoGenerator itemNoGenerator;
     private final OssService ossService;
     private final IModelImageService modelImageService;
+    private final ApplicationEventPublisher eventPublisher;
 
     // ==================== I1 我的物品列表 ====================
 
@@ -77,7 +81,7 @@ public class CreatorItemServiceImpl extends ServiceImpl<CreatorItemMapper, Creat
     @Transactional
     public ItemDetailVO createItem(Long creatorId, ItemSaveReq req) {
         if (StrUtil.isBlank(req.getTitle())) {
-            throw new BadRequestException("物品标题不能为空");
+            throw new BadRequestException("作品标题不能为空");
         }
         GarmentCategoryL1 category = GarmentCategoryL1.strictOf(req.getCategoryCode());
 
@@ -87,26 +91,40 @@ public class CreatorItemServiceImpl extends ServiceImpl<CreatorItemMapper, Creat
                 .setCategoryCode(category.getCode())
                 .setTitle(StrUtil.trim(req.getTitle()))
                 .setDescription(StrUtil.trimToNull(req.getDescription()))
-                .setPrice(req.getPrice())
+                .setLinkUrl(StrUtil.trimToNull(req.getLinkUrl()))
                 .setStatus(CreatorItemStatus.DRAFT.getCode())
                 .setTryonMode(resolveTryonMode(req.getTryonMode()).getCode())
-                .setColorHex(StrUtil.trimToNull(req.getColorHex()))
-                .setMaterial(StrUtil.trimToNull(req.getMaterial()))
                 .setPatternTags(toJson(req.getPatternTags()))
-                .setImageKey(StrUtil.trimToNull(req.getImageKey()))
-                .setCutoutPngKey(StrUtil.trimToNull(req.getCutoutPngKey()))
-                .setReferenceKeys(toJson(req.getReferenceKeys()))
-                .setRealWidthMm(req.getRealWidthMm())
-                .setRealHeightMm(req.getRealHeightMm())
-                .setPxPerMm(req.getPxPerMm())
-                .setAnchorJson(req.getAnchorJson() == null ? null : JSONUtil.toJsonStr(req.getAnchorJson()));
+                // 新建一定是「未经 AI 解析」：发布成功后才由后台回填，并置为 1
+                .setAiParsed(0)
+                .setZone(StrUtil.trimToNull(req.getZone()))
+                .setTopics(toJson(req.getTopics()))
+                .setImageKey(requireOwnImageKey(creatorId, req.getImageKey()))
+                // 创作者手填的「季节 / 衣服款式 / 材质成分」：
+                // 与 AI 的 aiSeasons / aiStyles / aiMaterial 是两份独立数据，各存各的列
+                .setSeasons(toJson(req.getSeasons()))
+                .setStyles(toJson(req.getStyles()))
+                .setMaterial(StrUtil.trimToNull(req.getMaterial()));
         save(item);
-        log.info("[item] 物品已创建 id={} itemNo={} creatorId={}", item.getId(), item.getItemNo(), creatorId);
+        log.info("[item] 作品已创建 id={} itemNo={} creatorId={}", item.getId(), item.getItemNo(), creatorId);
         return toDetailVO(item);
     }
 
     // ==================== I4 编辑（null = 不修改） ====================
 
+    /**
+     * 编辑作品。
+     *
+     * <p><b>只接受创作者能管的字段</b>：标题 / 描述 / 链接 / 分区 / 标签 / 话题 /
+     * 季节 / 衣服款式 / 材质成分 / 主图。
+     * 请求体里已经没有别的可写字段（见 {@link ItemSaveReq}），所以这里天然不可能
+     * 被用来改 AI 解析结果（{@code ai_} 列）或试穿标定数据。
+     *
+     * <p><b>增删图片不走这里</b>：走 {@code POST /creator/items/{id}/model-images}
+     * 与 {@code DELETE /creator/model-images/{imageId}}。
+     * 换主图额外做归属校验：{@code imageKey} 必须命中该作品已绑定的图片，
+     * 否则创作者可以把主图指向任意 OSS 路径（甚至别人的图）。
+     */
     @Override
     @Transactional
     public ItemDetailVO updateItem(Long creatorId, Long id, ItemSaveReq req) {
@@ -125,67 +143,51 @@ public class CreatorItemServiceImpl extends ServiceImpl<CreatorItemMapper, Creat
             updateWrapper.set(CreatorItem::getTitle, StrUtil.trim(req.getTitle()));
             changed = true;
         }
-        if (StrUtil.isNotBlank(req.getCategoryCode())) {
-            updateWrapper.set(CreatorItem::getCategoryCode, GarmentCategoryL1.strictOf(req.getCategoryCode()).getCode());
+        // 描述与链接允许传空串清空，所以判 null 而不是判空
+        if (req.getDescription() != null) {
+            updateWrapper.set(CreatorItem::getDescription, StrUtil.trimToNull(req.getDescription()));
             changed = true;
         }
-        if (StrUtil.isNotBlank(req.getDescription())) {
-            updateWrapper.set(CreatorItem::getDescription, StrUtil.trim(req.getDescription()));
+        if (req.getLinkUrl() != null) {
+            updateWrapper.set(CreatorItem::getLinkUrl, StrUtil.trimToNull(req.getLinkUrl()));
             changed = true;
         }
-        if (req.getPrice() != null) {
-            updateWrapper.set(CreatorItem::getPrice, req.getPrice());
-            changed = true;
-        }
-        if (StrUtil.isNotBlank(req.getTryonMode())) {
-            updateWrapper.set(CreatorItem::getTryonMode, resolveTryonMode(req.getTryonMode()).getCode());
-            changed = true;
-        }
-        if (StrUtil.isNotBlank(req.getColorHex())) {
-            updateWrapper.set(CreatorItem::getColorHex, StrUtil.trim(req.getColorHex()));
-            changed = true;
-        }
-        if (StrUtil.isNotBlank(req.getMaterial())) {
-            updateWrapper.set(CreatorItem::getMaterial, StrUtil.trim(req.getMaterial()));
+        if (StrUtil.isNotBlank(req.getZone())) {
+            updateWrapper.set(CreatorItem::getZone, StrUtil.trim(req.getZone()));
             changed = true;
         }
         if (req.getPatternTags() != null) {
             updateWrapper.set(CreatorItem::getPatternTags, toJson(req.getPatternTags()));
             changed = true;
         }
+        if (req.getTopics() != null) {
+            updateWrapper.set(CreatorItem::getTopics, toJson(req.getTopics()));
+            changed = true;
+        }
+        // 创作者手填的三个字段：只写无前缀列，绝不碰 aiSeasons / aiStyles / aiMaterial
+        if (req.getSeasons() != null) {
+            updateWrapper.set(CreatorItem::getSeasons, toJson(req.getSeasons()));
+            changed = true;
+        }
+        if (req.getStyles() != null) {
+            updateWrapper.set(CreatorItem::getStyles, toJson(req.getStyles()));
+            changed = true;
+        }
+        if (req.getMaterial() != null) {
+            updateWrapper.set(CreatorItem::getMaterial, StrUtil.trimToNull(req.getMaterial()));
+            changed = true;
+        }
         if (StrUtil.isNotBlank(req.getImageKey())) {
-            updateWrapper.set(CreatorItem::getImageKey, StrUtil.trim(req.getImageKey()));
-            changed = true;
-        }
-        if (StrUtil.isNotBlank(req.getCutoutPngKey())) {
-            updateWrapper.set(CreatorItem::getCutoutPngKey, StrUtil.trim(req.getCutoutPngKey()));
-            changed = true;
-        }
-        if (req.getReferenceKeys() != null) {
-            updateWrapper.set(CreatorItem::getReferenceKeys, toJson(req.getReferenceKeys()));
-            changed = true;
-        }
-        if (req.getRealWidthMm() != null) {
-            updateWrapper.set(CreatorItem::getRealWidthMm, req.getRealWidthMm());
-            changed = true;
-        }
-        if (req.getRealHeightMm() != null) {
-            updateWrapper.set(CreatorItem::getRealHeightMm, req.getRealHeightMm());
-            changed = true;
-        }
-        if (req.getPxPerMm() != null) {
-            updateWrapper.set(CreatorItem::getPxPerMm, req.getPxPerMm());
-            changed = true;
-        }
-        if (req.getAnchorJson() != null) {
-            updateWrapper.set(CreatorItem::getAnchorJson, JSONUtil.toJsonStr(req.getAnchorJson()));
+            String imageKey = StrUtil.trim(req.getImageKey());
+            requireOwnedImage(id, imageKey);
+            updateWrapper.set(CreatorItem::getImageKey, imageKey);
             changed = true;
         }
 
         if (changed) {
             update(updateWrapper);
         }
-        log.info("[item] 物品已更新 id={} creatorId={} changed={}", id, creatorId, changed);
+        log.info("[item] 作品已更新 id={} creatorId={} changed={}", id, creatorId, changed);
         return toDetailVO(getById(id));
     }
 
@@ -216,7 +218,9 @@ public class CreatorItemServiceImpl extends ServiceImpl<CreatorItemMapper, Creat
         validatePublishable(item);
 
         updateStatus(id, CreatorItemStatus.ON_SHELF);
-        log.info("[item] 物品已发布 id={} creatorId={}", id, creatorId);
+        log.info("[item] 物品已发布 id={} creatorId={}，已投递商品信息解析事件", id, creatorId);
+        // 异步解析商品信息：监听器挂在 AFTER_COMMIT 上，保证此时上架已落库
+        eventPublisher.publishEvent(new ItemPublishedEvent(creatorId, id));
     }
 
     // ==================== I7 / I8 上下架 ====================
@@ -248,7 +252,7 @@ public class CreatorItemServiceImpl extends ServiceImpl<CreatorItemMapper, Creat
     // ==================== 私有方法 ====================
 
     /**
-     * 构建查询条件：始终限定当前创作者自己的物品
+     * 构建查询条件：始终限定当前创作者自己的作品
      */
     private LambdaQueryWrapper<CreatorItem> buildQueryWrapper(Long creatorId, ItemPageQuery query) {
         LambdaQueryWrapper<CreatorItem> wrapper = new LambdaQueryWrapper<CreatorItem>()
@@ -257,11 +261,16 @@ public class CreatorItemServiceImpl extends ServiceImpl<CreatorItemMapper, Creat
             if (StrUtil.isNotBlank(query.getStatus())) {
                 wrapper.eq(CreatorItem::getStatus, query.getStatus().trim());
             }
-            if (StrUtil.isNotBlank(query.getCategoryCode())) {
-                wrapper.eq(CreatorItem::getCategoryCode, query.getCategoryCode().trim());
-            }
             if (StrUtil.isNotBlank(query.getKeyword())) {
-                wrapper.like(CreatorItem::getTitle, query.getKeyword().trim());
+                String kw = query.getKeyword().trim();
+                // 与列表页搜索框的承诺一致：标题 / 描述 / 分区 / 标签 / 款式 / 材质 任一命中即可。
+                // 刻意**不含**任何 ai_ 列：否则创作者能用关键词二分试探反推出 AI 的解析结果。
+                wrapper.and(w -> w.like(CreatorItem::getTitle, kw)
+                        .or().like(CreatorItem::getDescription, kw)
+                        .or().like(CreatorItem::getZone, kw)
+                        .or().like(CreatorItem::getPatternTags, kw)
+                        .or().like(CreatorItem::getStyles, kw)
+                        .or().like(CreatorItem::getMaterial, kw));
             }
         }
         return wrapper;
@@ -322,22 +331,41 @@ public class CreatorItemServiceImpl extends ServiceImpl<CreatorItemMapper, Creat
         ItemDetailVO vo = BeanUtils.copyBean(item, ItemDetailVO.class);
         vo.setId(item.getId());
         vo.setImageUrl(presignUrl(item.getImageKey()));
-        vo.setCutoutPngUrl(presignUrl(item.getCutoutPngKey()));
-        vo.setReferenceUrls(referenceUrls(item.getReferenceKeys()));
         vo.setModelImages(modelImageService.listByItem(item.getId()));
         return vo;
     }
 
-    private List<String> referenceUrls(String referenceKeys) {
-        if (StrUtil.isBlank(referenceKeys)) {
-            return Collections.emptyList();
+    /**
+     * 新建时的主图必须是该创作者自己 OSS 空间里的对象。
+     *
+     * <p>新建这一刻作品还没有模特图记录，所以没法用「是否属于本作品图片」来校验
+     * （那是编辑换主图时的口径）。退一步卡住最外层的边界：路径前缀必须是
+     * {@code creator/{自己userId}/}。否则创作者可以建一篇指向别人的图的作品。
+     */
+    private String requireOwnImageKey(Long creatorId, String imageKey) {
+        String key = StrUtil.trimToNull(imageKey);
+        if (key == null) {
+            return null;
         }
-        try {
-            List<String> keys = JSONUtil.parseArray(referenceKeys).toList(String.class);
-            return keys.stream().map(this::presignUrl).collect(Collectors.toList());
-        } catch (Exception e) {
-            log.warn("[item] 参考图列表解析失败，降级为空列表 itemNo={}", referenceKeys == null ? null : "size=" + referenceKeys.length(), e);
-            return Collections.emptyList();
+        if (!CreatorOssPathBuilder.belongsTo(creatorId, key)) {
+            throw new BadRequestException("主图路径不合法");
+        }
+        return key;
+    }
+
+    /**
+     * 换主图只能从该作品已绑定的图片里挑。
+     *
+     * <p>「图片不可修改」必须由服务端兜底：前端不给上传入口 ≠ 接口改不了。
+     * 不做这层校验，创作者直接调接口就能把主图指向任意 OSS 路径（含他人的图），
+     * 等于绕过了「作品图片只能 1 张或 4 张、且必须经过肖像授权」的全部约束。
+     */
+    private void requireOwnedImage(Long itemId, String imageKey) {
+        boolean owned = modelImageService.listByItem(itemId).stream()
+                .map(ModelImageVO::getImageKey)
+                .anyMatch(imageKey::equals);
+        if (!owned) {
+            throw new BadRequestException("主图必须从该作品已上传的图片中选择");
         }
     }
 

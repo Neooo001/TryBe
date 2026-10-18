@@ -2,8 +2,8 @@ package com.trybe.wardrobe.service;
 
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
+import com.trybe.common.ai.GarmentRecognizeResult;
 import com.trybe.common.service.OssService;
-import com.trybe.wardrobe.domain.dto.GarmentRecognizeResult;
 import com.trybe.wardrobe.domain.dto.UpdateWardrobeReq;
 import com.trybe.wardrobe.domain.enums.GarmentCategoryL1;
 import com.trybe.wardrobe.domain.enums.WardrobeSource;

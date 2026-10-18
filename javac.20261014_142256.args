@@ -1,0 +1,7 @@
+-encoding
+UTF-8
+-cp
+D:/Idea/JavaProject/TryBe/TryBe-common/target/classes;C:/Users/dell0/.m2/repository/io/swagger/swagger-annotations/1.6.6/swagger-annotations-1.6.6.jar;C:/Users/dell0/.m2/repository/org/projectlombok/lombok/1.18.20/lombok-1.18.20.jar
+-d
+C:/Users/dell0/AppData/Local/Temp/out
+TryBe-api/src/main/java/com/trybe/api/dto/WorkQuery.java

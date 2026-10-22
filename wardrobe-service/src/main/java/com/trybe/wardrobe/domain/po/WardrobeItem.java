@@ -39,10 +39,10 @@ public class WardrobeItem implements Serializable {
     /** 用户ID */
     private Long userId;
 
-    /** 来源：AI_IMPORT / TAOBAO_IMPORT / MANUAL / CUSTOM_OUTFIT */
+    /** 来源：AI_IMPORT / MANUAL / CUSTOM_OUTFIT（TAOBAO_IMPORT 为已下线功能的历史值） */
     private String source;
 
-    /** 关联product.id（仅淘宝导入） */
+    /** 关联 product.id（历史字段，仅老的淘宝导入数据有值） */
     private Long productId;
 
     /** 标题 */

@@ -27,16 +27,16 @@ public class WardrobeItemVO implements Serializable {
     @ApiModelProperty("衣柜条目ID")
     private Long wardrobeId;
 
-    @ApiModelProperty("来源：AI_IMPORT/TAOBAO_IMPORT/MANUAL/CUSTOM_OUTFIT")
+    @ApiModelProperty("来源：AI_IMPORT/MANUAL/CUSTOM_OUTFIT（TAOBAO_IMPORT 为历史值）")
     private String source;
 
     @ApiModelProperty("来源中文名")
     private String sourceText;
 
-    @ApiModelProperty("商品ID（仅淘宝导入）")
+    @ApiModelProperty("商品ID（历史字段）")
     private Long productId;
 
-    @ApiModelProperty("淘宝商品ID（仅淘宝导入）")
+    @ApiModelProperty("商品数字ID（历史字段）")
     private Long numIid;
 
     // ==================== 图片 ====================
@@ -151,7 +151,7 @@ public class WardrobeItemVO implements Serializable {
     @ApiModelProperty("标签列表")
     private List<String> tags;
 
-    // ==================== AI 元信息 / 淘宝商品信息 ====================
+    // ==================== AI 元信息 / 历史商品信息（淘宝导入已下线） ====================
 
     @ApiModelProperty("AI 是否已完成识别")
     private Integer aiRecognized;
@@ -162,16 +162,16 @@ public class WardrobeItemVO implements Serializable {
     @ApiModelProperty("识别置信度")
     private BigDecimal aiConfidence;
 
-    @ApiModelProperty("原价（仅淘宝导入）")
+    @ApiModelProperty("原价（历史字段）")
     private String reservePrice;
 
-    @ApiModelProperty("折后价/券后价（仅淘宝导入）")
+    @ApiModelProperty("折后价/券后价（历史字段）")
     private String zkFinalPrice;
 
-    @ApiModelProperty("商品落地页URL（仅淘宝导入）")
+    @ApiModelProperty("商品落地页URL（历史字段）")
     private String itemUrl;
 
-    @ApiModelProperty("店铺名称（仅淘宝导入）")
+    @ApiModelProperty("店铺名称（历史字段）")
     private String shopTitle;
 
     @ApiModelProperty("创建时间")

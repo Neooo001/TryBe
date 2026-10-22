@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 
 /**
  * <p>
- * 商品表（淘宝导入公共资源，num_iid 唯一去重）
+ * 商品表（历史遗留：淘宝链接导入已下线，此表仅用于兼容存量数据，不再写入）
  * </p>
  */
 @Data
@@ -28,7 +28,7 @@ public class Product implements Serializable {
     private Long id;
 
     /**
-     * 淘宝商品ID
+     * 商品数字ID（历史字段）
      */
     private Long numIid;
 
@@ -38,7 +38,7 @@ public class Product implements Serializable {
     private String title;
 
     /**
-     * 原始主图URL（淘宝CDN）
+     * 原始主图URL
      */
     private String pictUrl;
 
@@ -98,7 +98,7 @@ public class Product implements Serializable {
     private String detailImageKeys;
 
     /**
-     * 淘宝API原始返回JSON（备用）
+     * 第三方接口原始返回JSON（历史字段）
      */
     private String rawJson;
 

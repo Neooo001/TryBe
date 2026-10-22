@@ -2,7 +2,6 @@ package com.trybe.wardrobe.service;
 
 import com.trybe.common.domain.PageDTO;
 import com.trybe.common.domain.PageQuery;
-import com.trybe.wardrobe.domain.dto.TaobaoImportReq;
 import com.trybe.wardrobe.domain.dto.UpdateWardrobeReq;
 import com.trybe.wardrobe.domain.vo.WardrobeItemVO;
 import org.springframework.web.multipart.MultipartFile;
@@ -11,11 +10,6 @@ import org.springframework.web.multipart.MultipartFile;
  * 衣柜服务
  */
 public interface IWardrobeService {
-
-    /**
-     * 淘宝分享链接导入
-     */
-    WardrobeItemVO importFromTaobao(Long userId, TaobaoImportReq req);
 
     /**
      * 手动添加

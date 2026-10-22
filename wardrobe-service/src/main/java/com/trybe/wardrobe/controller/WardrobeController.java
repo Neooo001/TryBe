@@ -4,7 +4,6 @@ import com.trybe.common.domain.PageDTO;
 import com.trybe.common.domain.PageQuery;
 import com.trybe.common.domain.R;
 import com.trybe.common.utils.UserContext;
-import com.trybe.wardrobe.domain.dto.TaobaoImportReq;
 import com.trybe.wardrobe.domain.dto.UpdateWardrobeReq;
 import com.trybe.wardrobe.domain.vo.WardrobeItemVO;
 import com.trybe.wardrobe.service.IWardrobeService;
@@ -35,14 +34,7 @@ public class WardrobeController {
 
     private final IWardrobeService wardrobeService;
 
-    @ApiOperation("淘宝分享链接导入")
-    @PostMapping("/import/taobao")
-    public R<WardrobeItemVO> importFromTaobao(@RequestBody @Valid TaobaoImportReq req) {
-        Long userId = UserContext.requireUser();
-        log.info("[Wardrobe] 淘宝导入请求 userId={}", userId);
-        log.info("源数据：{}", req.toString());
-        return R.ok(wardrobeService.importFromTaobao(userId, req));
-    }
+ 
 
     @ApiOperation("手动添加")
     @PostMapping("/manual")
@@ -69,7 +61,7 @@ public class WardrobeController {
     @ApiOperation("分页查询衣柜（支持按一级分类/穿着状态/关键词筛选）")
     @GetMapping
     public R<PageDTO<WardrobeItemVO>> listWardrobe(
-            @ApiParam("来源：AI_IMPORT/TAOBAO_IMPORT/MANUAL/CUSTOM_OUTFIT")
+            @ApiParam("来源：AI_IMPORT/MANUAL/CUSTOM_OUTFIT（TAOBAO_IMPORT 为历史值）")
             @RequestParam(required = false) String source,
             @ApiParam("一级分类：TOP/BOTTOM/SET/SHOES/BAG/ACCESSORY/DECOR/OTHER，不传则查全部")
             @RequestParam(required = false) String categoryL1,

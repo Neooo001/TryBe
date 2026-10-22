@@ -13,9 +13,6 @@ import com.trybe.common.exception.BadRequestException;
 import com.trybe.common.exception.BizIllegalException;
 import com.trybe.common.exception.ForbiddenException;
 import com.trybe.common.service.OssService;
-import com.trybe.wardrobe.config.TaobaoProperties;
-import com.trybe.wardrobe.domain.dto.TaobaoImportReq;
-import com.trybe.wardrobe.domain.dto.TaobaoProductDTO;
 import com.trybe.wardrobe.domain.dto.UpdateWardrobeReq;
 import com.trybe.wardrobe.domain.enums.GarmentCategoryL1;
 import com.trybe.wardrobe.domain.enums.WardrobeSource;
@@ -25,11 +22,8 @@ import com.trybe.wardrobe.domain.po.WardrobeItem;
 import com.trybe.wardrobe.domain.vo.WardrobeItemVO;
 import com.trybe.wardrobe.mapper.ProductMapper;
 import com.trybe.wardrobe.mapper.WardrobeItemMapper;
-import com.trybe.wardrobe.service.ITaobaoService;
 import com.trybe.wardrobe.service.IWardrobeService;
 import com.trybe.wardrobe.service.WardrobeItemConverter;
-import com.trybe.wardrobe.util.TaobaoImageUtil;
-import com.trybe.wardrobe.util.TaobaoShareParser;
 import com.trybe.wardrobe.util.WardrobeOssPathBuilder;
 import com.trybe.wardrobe.util.WardrobeSortParser;
 import lombok.RequiredArgsConstructor;
@@ -55,41 +49,16 @@ import java.util.Map;
 public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, WardrobeItem> implements IWardrobeService {
 
     private final ProductMapper productMapper;
-    private final ITaobaoService taobaoService;
     private final OssService ossService;
-    private final TaobaoProperties taobaoProperties;
     private final WardrobeItemConverter converter;
 
     /**
-     * 从淘宝导入
+     * 手动添加
+     *
+     * <p>⚠️ 不加事务：图片要先传到 OSS（外网 IO），再把 key 落库。放进事务里等于抱着数据库连接等上传，
+     * 大图/弱网时一条连接会被占用十几秒，是连接池被打满的另一条路径。只有一次 insert，无需事务。
      */
     @Override
-    @Transactional
-    public WardrobeItemVO importFromTaobao(Long userId, TaobaoImportReq req) {
-        // 1. 解析商品ID：快速路径（本地正则+重定向）→ API兜底（taobao.tbk.tpwd.parse）
-        Long numIid = resolveNumIid(req.getShareText());
-        log.info("[Wardrobe] 解析商品ID shareText={} numIid={}", req.getShareText(), numIid);
-
-        // 2. 商品去重：已存在则复用
-        Product product = findByNumIid(numIid);
-        if (product == null) {
-            product = fetchAndSaveProduct(numIid);
-        }
-
-        // 3. 创建衣柜条目（衣服属性留空，用户可在详情页补充；后续由 AI 补全任务填充）
-        WardrobeItem item = newItem(userId, WardrobeSource.TAOBAO_IMPORT);
-        item.setProductId(product.getId());
-        item.setTitle(product.getTitle());
-        item.setImageKey(product.getMainImageKey());
-        item.setDetailImageKeys(product.getDetailImageKeys());
-        save(item);
-
-        log.info("[Wardrobe] 淘宝导入成功 userId={} numIid={} wardrobeId={}", userId, numIid, item.getId());
-        return converter.toVO(item, product);
-    }
-
-    @Override
-    @Transactional
     public WardrobeItemVO addManual(Long userId, String title, String remark, MultipartFile image) {
         if (StrUtil.isBlank(title)) {
             throw new BadRequestException(ErrorCodeEnum.PARAM_EMPTY, "标题不能为空");
@@ -111,8 +80,12 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
         return converter.toVO(item, null);
     }
 
+    /**
+     * 自定义穿搭上传
+     *
+     * <p>⚠️ 不加事务：同 {@link #addManual}，先传 OSS 再插一条记录。
+     */
     @Override
-    @Transactional
     public WardrobeItemVO addOutfit(Long userId, String title, String remark, MultipartFile image) {
         if (StrUtil.isBlank(title)) {
             throw new BadRequestException(ErrorCodeEnum.PARAM_EMPTY, "标题不能为空");
@@ -233,21 +206,28 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
         return converter.toVO(item, findProductById(item.getProductId()));
     }
 
+    /**
+     * 删除衣柜条目
+     *
+     * <p>⚠️ 不加事务，且顺序固定为「先删库、再清 OSS」：
+     * 删库是单条操作本身原子；OSS 删除是最多 4~5 次外网调用，
+     * 放进事务里会持着数据库连接等网络（同样是连接池耗尽的来源）。
+     * 若 OSS 清理失败，库里已经没有这条记录，只会留下无人引用的对象，不影响用户。
+     */
     @Override
-    @Transactional
     public void deleteItem(Long userId, Long wardrobeId) {
         WardrobeItem item = getOwnedItem(userId, wardrobeId);
 
+        removeById(wardrobeId);
+
         // 用户私有来源（AI导入/手动/穿搭）：删除用户目录下的图片文件
-        // 淘宝导入仅解除关联，不动公共商品与图片
+        // 历史遗留：来源为 TAOBAO_IMPORT 的老数据只删条目、不动公共商品图片
         if (!WardrobeSource.TAOBAO_IMPORT.getValue().equals(item.getSource())) {
             deleteFileQuietly(item.getImageKey());
             deleteFileQuietly(item.getOriginImageKey());
             deleteFileQuietly(item.getCutoutImageKey());
             deleteFileQuietly(converter.toStringList(item.getDetailImageKeys()));
         }
-
-        removeById(wardrobeId);
         log.info("[Wardrobe] 删除成功 userId={} wardrobeId={} source={}", userId, wardrobeId, item.getSource());
     }
 
@@ -271,89 +251,12 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
     /**
      * 解析商品ID：快速路径 → API兜底
      */
-    private Long resolveNumIid(String shareText) {
-        if (StrUtil.isBlank(shareText)) {
-            throw new BadRequestException(ErrorCodeEnum.PARAM_EMPTY, "分享文案不能为空");
-        }
-
-        String numIidStr = TaobaoShareParser.parseNumIid(shareText);
-        if (numIidStr != null) {
-            try {
-                return Long.valueOf(numIidStr);
-            } catch (NumberFormatException e) {
-                log.warn("[Wardrobe] 本地解析商品ID格式错误 numIidStr={}", numIidStr);
-            }
-        }
-
-        Long numIid = taobaoService.tpwdParse(shareText);
-        if (numIid != null) {
-            return numIid;
-        }
-
-        throw new BadRequestException(ErrorCodeEnum.PARAM_FORMAT_ERR, "无法从分享链接中解析商品ID");
-    }
+ 
 
     /**
      * 查询并落库商品（含下载图片上传 OSS）
      */
-    private Product fetchAndSaveProduct(Long numIid) {
-        TaobaoProductDTO dto = taobaoService.getItemInfo(numIid);
-        if (dto == null) {
-            throw new BadRequestException(ErrorCodeEnum.DATA_NOT_FOUND, "未查询到该商品信息");
-        }
-
-        Product product = new Product();
-        product.setNumIid(numIid);
-        product.setTitle(dto.getTitle());
-        product.setPictUrl(dto.getPictUrl());
-        product.setSmallImages(JSONUtil.toJsonStr(dto.getSmallImages() == null ? new ArrayList<String>() : dto.getSmallImages()));
-        product.setReservePrice(dto.getReservePrice());
-        product.setZkFinalPrice(dto.getZkFinalPrice());
-        product.setItemUrl(dto.getItemUrl());
-        product.setSellerId(dto.getSellerId());
-        product.setShopTitle(dto.getShopTitle());
-        product.setVolume(dto.getVolume());
-        product.setProvcity(dto.getProvcity());
-        product.setCategory(dto.getCategory());
-        product.setRawJson(dto.getRawJson());
-
-        // 主图是试穿的输入素材，必须成功；详情图失败可跳过，不影响主流程
-        byte[] mainBytes = TaobaoImageUtil.download(dto.getPictUrl());
-        if (mainBytes == null) {
-            log.warn("[Wardrobe] 商品主图下载失败 numIid={} pictUrl={}", numIid, dto.getPictUrl());
-            throw new BizIllegalException(ErrorCodeEnum.THIRD_PARTY_ERROR, "商品主图获取失败，请稍后重试");
-        }
-        String mainKey = uploadBytes(mainBytes, WardrobeOssPathBuilder.productMain(numIid));
-
-        List<String> detailKeys = new ArrayList<>();
-        if (dto.getSmallImages() != null) {
-            int max = Math.max(0, taobaoProperties.getMaxDetailImages());
-            int index = 1;
-            for (String url : dto.getSmallImages()) {
-                if (detailKeys.size() >= max) {
-                    break;
-                }
-                byte[] bytes = TaobaoImageUtil.download(url);
-                if (bytes == null) {
-                    continue;
-                }
-                String key = uploadBytes(bytes, WardrobeOssPathBuilder.productDetail(numIid, index));
-                if (key != null) {
-                    detailKeys.add(key);
-                }
-                index++;
-            }
-        }
-
-        product.setMainImageKey(mainKey);
-        product.setDetailImageKeys(JSONUtil.toJsonStr(detailKeys));
-        product.setCreateTime(LocalDateTime.now());
-        product.setUpdateTime(LocalDateTime.now());
-        productMapper.insert(product);
-
-        log.info("[Wardrobe] 商品落库成功 numIid={} productId={} detailCount={}", numIid, product.getId(), detailKeys.size());
-        return product;
-    }
+ 
 
     private String uploadBytes(byte[] bytes, String objectKey) {
         try (ByteArrayInputStream in = new ByteArrayInputStream(bytes)) {
@@ -374,9 +277,7 @@ public class WardrobeServiceImpl extends ServiceImpl<WardrobeItemMapper, Wardrob
         }
     }
 
-    private Product findByNumIid(Long numIid) {
-        return productMapper.selectOne(new LambdaQueryWrapper<Product>().eq(Product::getNumIid, numIid));
-    }
+ 
 
     private Product findProductById(Long productId) {
         if (productId == null) {

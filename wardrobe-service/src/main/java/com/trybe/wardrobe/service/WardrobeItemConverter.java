@@ -123,7 +123,7 @@ public class WardrobeItemConverter {
         vo.setAiModel(item.getAiModel());
         vo.setAiConfidence(item.getAiConfidence());
 
-        // 淘宝商品信息
+        // 历史商品信息（淘宝导入已下线，仅老数据有值）
         if (product != null) {
             vo.setNumIid(product.getNumIid());
             vo.setReservePrice(product.getReservePrice());

@@ -22,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.Collections;
@@ -43,6 +44,11 @@ public class BodyProfileServiceImpl extends ServiceImpl<BodyProfileMapper, BodyP
 
     private final BodyProfileMaterialMapper materialMapper;
     private final MaterialClient materialClient;
+    /**
+     * 编程式事务模板
+     *
+     */
+    private final TransactionTemplate transactionTemplate;
 
     private static final String DEFAULT_PROFILE_NAME = "默认档案";
 
@@ -68,13 +74,13 @@ public class BodyProfileServiceImpl extends ServiceImpl<BodyProfileMapper, BodyP
     }
 
     @Override
-    @Transactional
     public BodyProfileVO linkMaterial(Long userId, Long materialId) {
         if (materialId == null) {
             throw new BadRequestException(ErrorCodeEnum.PARAM_EMPTY, "素材ID不能为空");
         }
 
-        // 1. 校验素材有效性并确定类型
+        // 1. 校验素材有效性并确定类型（Feign 调用，放在事务外：
+        //    不该为了让这段看起来「原子」而拿一条数据库连接去等一次 HTTP 往返）
         BatchMaterialResult result = materialClient.validateMaterials(userId, Collections.singletonList(materialId));
         if (result.getInvalidMaterialIds() != null && !result.getInvalidMaterialIds().isEmpty()) {
             throw new BadRequestException(ErrorCodeEnum.PARAM_FORMAT_ERR,
@@ -86,17 +92,31 @@ public class BodyProfileServiceImpl extends ServiceImpl<BodyProfileMapper, BodyP
         }
         String materialType = validMaterials.get(0).getMaterialType();
 
-        // 2. 懒创建档案
+        // 2. 写库（短事务）：懒创建档案 + 幂等判断 + 写中间表
+        BodyProfile profile = transactionTemplate.execute(status -> doLink(userId, materialId, materialType));
+        return toVO(profile, listMaterials(profile.getId(), userId));
+    }
+
+    /**
+     * 关联素材的实际写库部分（只应在事务内被调用）
+     *
+     * <p>拆出来是为了让 Feign 校验留在事务外：同类内部直接调用 {@code @Transactional}
+     * 方法不会走代理，所以这里靠调用方的 TransactionTemplate 提供事务。
+     *
+     * @return 该用户的身形档案（无论本次是否真的插入了关联记录）
+     */
+    private BodyProfile doLink(Long userId, Long materialId, String materialType) {
+        // 1. 懒创建档案
         BodyProfile profile = getOrCreate(userId);
 
-        // 3. 幂等：已关联则直接返回
+        // 2. 幂等：已关联则直接返回
         Integer count = selectCount(profile.getId(), materialId);
         if (count != null && count > 0) {
             log.info("[BodyProfile] 素材已关联，跳过 userId={} materialId={}", userId, materialId);
-            return toVO(profile, listMaterials(profile.getId(), userId));
+            return profile;
         }
 
-        // 4. 写入中间表
+        // 3. 写入中间表
         BodyProfileMaterial link = new BodyProfileMaterial();
         link.setProfileId(profile.getId());
         link.setMaterialId(materialId);
@@ -108,24 +128,31 @@ public class BodyProfileServiceImpl extends ServiceImpl<BodyProfileMapper, BodyP
 
         log.info("[BodyProfile] 素材已关联 userId={} profileId={} materialId={} type={}",
                 userId, profile.getId(), materialId, materialType);
-        return toVO(profile, listMaterials(profile.getId(), userId));
+        return profile;
     }
 
     @Override
-    @Transactional
     public void unlinkMaterial(Long userId, Long materialId) {
-        BodyProfile profile = selectByUserId(userId);
+        // 1. 短事务：只删关联关系
+        BodyProfile profile = transactionTemplate.execute(status -> {
+            BodyProfile current = selectByUserId(userId);
+            if (current == null) {
+                return null;
+            }
+            LambdaQueryWrapper<BodyProfileMaterial> wrapper = new LambdaQueryWrapper<BodyProfileMaterial>()
+                    .eq(BodyProfileMaterial::getProfileId, current.getId())
+                    .eq(BodyProfileMaterial::getMaterialId, materialId);
+            materialMapper.delete(wrapper);
+            return current;
+        });
         if (profile == null) {
             return;
         }
-        LambdaQueryWrapper<BodyProfileMaterial> wrapper = new LambdaQueryWrapper<BodyProfileMaterial>()
-                .eq(BodyProfileMaterial::getProfileId, profile.getId())
-                .eq(BodyProfileMaterial::getMaterialId, materialId);
-        materialMapper.delete(wrapper);
         log.info("[BodyProfile] 素材已解除关联 userId={} profileId={} materialId={}",
                 userId, profile.getId(), materialId);
 
-        // 级联清理：该素材不再被任何档案引用时，删 OSS 文件 + 软删 material 记录
+        // 2. 事务外：孤儿素材清理（Feign 删素材 + 删 OSS 文件）。
+        //    失败只告警、由 material-service 的定时任务兜底 —— 不该因为清理失败回滚已提交的解绑
         cleanupOrphanMaterial(userId, materialId);
     }
 

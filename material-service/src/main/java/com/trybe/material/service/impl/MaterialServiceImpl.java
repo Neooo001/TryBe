@@ -31,6 +31,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.Collections;
@@ -50,6 +51,11 @@ public class MaterialServiceImpl extends ServiceImpl<MaterialMapper, Material> i
     private final OssService ossService;
     private final RabbitTemplate rabbitTemplate;
     private final MaterialCheckLogMapper materialCheckLogMapper;
+    /**
+     * 编程式事务模板
+     *
+     */
+    private final TransactionTemplate transactionTemplate;
 
     private static final String MATERIAL_TMP_PATH_PREFIX = "material/tmp";
 
@@ -215,82 +221,92 @@ public class MaterialServiceImpl extends ServiceImpl<MaterialMapper, Material> i
     // ==================== 垃圾回收方法 ====================
 
     @Override
-    @Transactional
     public void markFailed(Long materialId, String failReason) {
         Material material = getById(materialId);
         if (material == null) {
             return;
         }
-        // 标记失败状态（不立即软删，前端需查询失败原因；软删交由定时任务延迟处理）
-        material.setStatus(MaterialStatus.FAILED);
-        material.setFailReason(failReason);
-        material.setUpdateTime(LocalDateTime.now());
-        updateById(material);
+        // 1) 事务只包状态更新。只写必要字段：整实体 updateById 会把读到的旧值一起回写，
+        //    覆盖掉这段时间里别人改过的字段
+        Material patch = new Material();
+        patch.setId(materialId);
+        patch.setStatus(MaterialStatus.FAILED);
+        patch.setFailReason(failReason);
+        patch.setUpdateTime(LocalDateTime.now());
+        transactionTemplate.executeWithoutResult(status -> updateById(patch));
 
-        // 删除临时文件（校验失败的素材只存在于 tmp 前缀）
+        // 2) 删临时文件放在事务外：OSS 删除是网络调用，塞进事务会让连接被占住数百毫秒
+        //    （校验失败的素材只存在于 tmp 前缀，删失败也只是临时文件残留，由生命周期兜底）
         deleteTmpFile(material.getObjectKey());
         log.info("[Material] 校验失败已标记 materialId={} failReason={}", materialId, failReason);
     }
 
     @Override
-    @Transactional
     public int cleanZombie(LocalDateTime beforeTime) {
         List<Material> zombies = lambdaQuery()
                 .eq(Material::getStatus, MaterialStatus.PENDING_UPLOAD)
                 .lt(Material::getCreateTime, beforeTime)
                 .list();
+        if (zombies.isEmpty()) {
+            return 0;
+        }
 
-        int cleaned = 0;
+        // 1) 短事务：批量软删（一条 UPDATE ... WHERE id IN (...)，不含任何网络调用）
+        List<Long> ids = zombies.stream().map(Material::getId).collect(Collectors.toList());
+        transactionTemplate.executeWithoutResult(status -> removeByIds(ids));
+
+        // 2) 事务外：删 tmp 文件。原先「删一条记录 + 删一个文件」交替执行，
+        //    每个文件都要等 OSS 往返，攒到十几条就把事务和连接一起拖长
         for (Material material : zombies) {
-            removeById(material.getId());
             deleteTmpFile(material.getObjectKey());
-            cleaned++;
         }
-        if (cleaned > 0) {
-            log.info("[Material] 清理上传僵尸素材 count={}", cleaned);
-        }
-        return cleaned;
+
+        log.info("[Material] 清理上传僵尸素材 count={}", ids.size());
+        return ids.size();
     }
 
     @Override
-    @Transactional
     public int archiveFailed(LocalDateTime beforeTime) {
         List<Material> failed = lambdaQuery()
                 .eq(Material::getStatus, MaterialStatus.FAILED)
                 .lt(Material::getUpdateTime, beforeTime)
                 .list();
+        if (failed.isEmpty()) {
+            return 0;
+        }
 
-        int archived = 0;
-        for (Material material : failed) {
-            // 失败素材的 tmp 文件在 markFailed 时已删，这里只需软删记录
-            removeById(material.getId());
-            archived++;
-        }
-        if (archived > 0) {
-            log.info("[Material] 归档失败素材 count={}", archived);
-        }
-        return archived;
+        // 失败素材的 tmp 文件在 markFailed 时已删，这里只需软删记录：
+        // 一条批量 UPDATE 替掉逐条 removeById，事务从「N 次往返」缩到「1 次」
+        List<Long> ids = failed.stream().map(Material::getId).collect(Collectors.toList());
+        transactionTemplate.executeWithoutResult(status -> removeByIds(ids));
+
+        log.info("[Material] 归档失败素材 count={}", ids.size());
+        return ids.size();
     }
 
     @Override
-    @Transactional
     public int physicallyClean(LocalDateTime beforeTime) {
         List<Material> deleted = baseMapper.selectDeletedBefore(beforeTime);
+        if (deleted.isEmpty()) {
+            return 0;
+        }
 
-        int cleaned = 0;
+        // 1) 事务外先删正式文件：删 OSS 是幂等的（不存在时也返回成功），
+        //    放在最前面意味着「事务失败可整批重跑」，最坏只是多删一次不存在的对象
         for (Material material : deleted) {
-            // 删除正式文件（软删记录可能还留有正式路径文件）
             deleteFileQuietly(material.getObjectKey());
-            // 删除校验日志
-            materialCheckLogMapper.deleteByMaterialId(material.getId());
-            // 物理删除记录
-            baseMapper.physicallyDeleteById(material.getId());
-            cleaned++;
         }
-        if (cleaned > 0) {
-            log.info("[Material] 归档物理清理 count={}", cleaned);
-        }
-        return cleaned;
+
+        // 2) 短事务：删校验日志 + 物理删记录（只剩本地写，事务耗时回到毫秒级）
+        transactionTemplate.executeWithoutResult(status -> {
+            for (Material material : deleted) {
+                materialCheckLogMapper.deleteByMaterialId(material.getId());
+                baseMapper.physicallyDeleteById(material.getId());
+            }
+        });
+
+        log.info("[Material] 归档物理清理 count={}", deleted.size());
+        return deleted.size();
     }
 
     private void deleteTmpFile(String objectKey) {

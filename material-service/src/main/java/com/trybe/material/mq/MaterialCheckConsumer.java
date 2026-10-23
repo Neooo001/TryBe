@@ -19,7 +19,7 @@ import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.amqp.support.AmqpHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
@@ -50,11 +50,23 @@ public class MaterialCheckConsumer {
     private final MaterialCheckContext checkContext;
     private final RedisIdempotentGuard idempotentGuard;
     private final OssService ossService;
+    /**
+     * 编程式事务模板
+     *
+     * <p>整个消费流程里混了 Redis、AI 人脸检测、OSS 搬文件三种网络等待，
+     * 原先用一个 {@code @Transactional} 全包住 —— 连接会从「收到消息」一直被占到
+     * 「最后一条 SQL 提交」，上传高峰期就是它在吃连接池。
+     * 现在只有「写日志 + 改状态」这一小段进事务。
+     */
+    private final TransactionTemplate transactionTemplate;
 
     private static final String TMP_PATH_PREFIX = "material/tmp/";
 
+    /**
+     * 素材校验消费
+     *
+     */
     @RabbitListener(queues = MaterialMqConfig.CHECK_QUEUE, ackMode = "MANUAL")
-    @Transactional
     public void onMaterialCheck(MaterialCheckMessage message, Channel channel,
                                 @Header(AmqpHeaders.DELIVERY_TAG) long deliveryTag) throws IOException {
 
@@ -98,7 +110,7 @@ public class MaterialCheckConsumer {
             return;
         }
 
-        // ========== 5. 执行校验 ==========
+        // ========== 5. 执行校验（AI 人脸/手部检测 —— 纯网络等待，事务外） ==========
         long startMs = System.currentTimeMillis();
         CheckResult result;
         try {
@@ -108,32 +120,43 @@ public class MaterialCheckConsumer {
             result = CheckResult.fail("校验异常: " + e.getMessage(), null);
         }
         long costMs = System.currentTimeMillis() - startMs;
+        final CheckResult checkResult = result;
 
-        // ========== 6. 记录校验日志 ==========
-        String checkTypeStr = materialType.equals("FACE") ? CheckType.AI_FACE.getValue() : CheckType.AI_HAND.getValue();
-        Long logId = checkLogService.logCheckStart(materialId, checkTypeStr);
-        checkLogService.logCheckResult(logId, result.isPassed(), result.getDetail(), costMs);
-
-        // ========== 7. 更新素材状态 ==========
-        if (result.isPassed()) {
-            // 校验通过：从 tmp 移动到正式路径，并更新 objectKey
-            String finalKey = toFinalKey(material.getObjectKey());
+        // ========== 6. 校验通过：tmp → 正式路径（copy + delete 两次网络往返，事务外） ==========
+        // 与原实现保持一致：移动失败不阻断，保留 tmp objectKey（tmp 文件由生命周期兜底）。
+        // 也就是说这条链路原本就没有「文件与库记录强一致」的保证，拆事务不会让它变差。
+        String movedObjectKey = material.getObjectKey();
+        if (checkResult.isPassed()) {
+            String targetKey = toFinalKey(material.getObjectKey());
             try {
-                ossService.moveObject(material.getObjectKey(), finalKey);
-                material.setObjectKey(finalKey);
+                ossService.moveObject(material.getObjectKey(), targetKey);
+                movedObjectKey = targetKey;
             } catch (Exception e) {
                 log.error("[MaterialCheckConsumer] 移动OSS文件失败 materialId={} tmp={} final={}",
-                        materialId, material.getObjectKey(), finalKey, e);
-                // 移动失败不阻断，保留 tmp objectKey（tmp 文件由生命周期兜底）
+                        materialId, material.getObjectKey(), targetKey, e);
             }
-            updateMaterialStatus(material, MaterialStatus.PASSED, null);
-        } else {
-            materialService.markFailed(materialId, result.getMessage());
         }
 
-        // ========== 8. 手动 ACK ==========
+        // ========== 7. 短事务：校验日志 + 通过时的状态流转（只做本地写） ==========
+        String checkTypeStr = materialType.equals("FACE") ? CheckType.AI_FACE.getValue() : CheckType.AI_HAND.getValue();
+        final String finalObjectKey = movedObjectKey;
+        transactionTemplate.executeWithoutResult(status -> {
+            Long logId = checkLogService.logCheckStart(materialId, checkTypeStr);
+            checkLogService.logCheckResult(logId, checkResult.isPassed(), checkResult.getDetail(), costMs);
+            if (checkResult.isPassed()) {
+                material.setObjectKey(finalObjectKey);
+                updateMaterialStatus(material, MaterialStatus.PASSED, null);
+            }
+        });
+
+        // ========== 8. 校验失败：标记失败（内部也是短事务改状态 + 事务外删 tmp 文件） ==========
+        if (!checkResult.isPassed()) {
+            materialService.markFailed(materialId, checkResult.getMessage());
+        }
+
+        // ========== 9. 手动 ACK ==========
         channel.basicAck(deliveryTag, false);
-        log.info("[MaterialCheckConsumer] 消费完成 materialId={} passed={} costMs={}", materialId, result.isPassed(), costMs);
+        log.info("[MaterialCheckConsumer] 消费完成 materialId={} passed={} costMs={}", materialId, checkResult.isPassed(), costMs);
     }
 
     /**

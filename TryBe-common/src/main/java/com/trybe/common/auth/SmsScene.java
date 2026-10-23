@@ -13,11 +13,17 @@ package com.trybe.common.auth;
  */
 public enum SmsScene {
 
-    /** 绑定/换绑手机号场景（wx 域） */
+    /** 绑定/换绑手机号场景（小程序） */
     BIND("绑定手机号"),
 
-    /** 设置/修改密码场景（wx 域） */
-    SET_PASSWORD("设置密码");
+    /** 设置/修改密码场景（两端共用） */
+    SET_PASSWORD("设置密码"),
+
+    /** Web 端短信验证码登录（账号体系 v3 新增，小程序不开放短信登录） */
+    WEB_LOGIN("Web 短信登录"),
+
+    /** Web 端手机号注册 */
+    WEB_REGISTER("Web 手机号注册");
 
     private final String desc;
 

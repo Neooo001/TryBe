@@ -11,8 +11,8 @@ import com.trybe.user.domain.vo.UserLoginVO;
 /**
  * wx 域（小程序）认证门面 —— {@code /users/auth/**} 的业务编排。
  *
- * <p><b>双账号域拆分后</b>：本门面只服务小程序域，签发的令牌 realm=wx；
- * Web 创作者后台走 {@code /web/auth/**}（web 域，账号表 web_user），两端零关联。
+ * <p><b>账号体系 v3</b>：本门面只服务小程序端，签发的令牌 realm=wx；
+ * Web 创作者后台走 {@code /web/auth/**}，两端共用 {@code app_user}。
  *
  * <p>编排职责：图形码 / 限流 / 发码（免鉴权版 + 登录版）/ 密码登录 / 绑定手机号。
  * 具体凭据解析与归属转移委托给 {@link UserIdentityService}，令牌下发委托给

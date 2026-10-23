@@ -65,7 +65,7 @@ public class WorkDetailDTO {
     @ApiModelProperty("材质成分，如 棉95%/氨纶5%")
     private String material;
 
-    @ApiModelProperty("创作者ID（web 域 web_user.id，仅用于展示归属，不用于任何鉴权）")
+    @ApiModelProperty("创作者ID（app_user.id，仅用于展示归属，不用于任何鉴权）")
     private Long creatorId;
 
     @ApiModelProperty("创作者昵称（无档案时为默认兜底名）")

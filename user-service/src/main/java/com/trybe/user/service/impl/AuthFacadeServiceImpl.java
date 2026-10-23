@@ -142,9 +142,27 @@ public class AuthFacadeServiceImpl implements AuthFacadeService {
             throw new BizIllegalException(ErrorCodeEnum.BIZ_ERROR, "验证码错误或已过期");
         }
 
-        userIdentityService.bindOrTransferInTx(userId, phone);
-        log.info("[auth] 手机号绑定成功 userId={} phone={}", userId, maskPhone(phone));
-        return new PhoneBindVO(userId, phone, PhoneState.BOUND);
+        // v3：手机号已属于另一个账号时，当前账号并入对方（数据随手机号走），并返回新的登录身份
+        UserIdentityService.BindResult result = userIdentityService.bindPhoneInTx(userId, phone);
+        User user = requireExistUser(result.getUserId());
+        userIdentityService.touchLogin(user.getId());
+
+        PhoneBindVO vo = new PhoneBindVO(user.getId(), phone, PhoneState.BOUND);
+        vo.setNickname(user.getNickname());
+        vo.setHasPassword(userIdentityService.hasPassword(user.getId()));
+        vo.setMerged(result.isMerged());
+
+        if (result.isMerged()) {
+            // 账号已切换：必须重新签发令牌，否则前端仍拿着已作废账号的 token
+            TokenIssuer.TokenPair token = tokenIssuer.issue(user.getId(), RealmConstants.WX, null);
+            vo.setAccessToken(token.getAccessToken());
+            vo.setRefreshToken(token.getRefreshToken());
+            vo.setExpiresIn(token.getExpiresIn());
+            log.info("[auth] 绑号触发账号合并，已重签令牌 oldUserId={} newUserId={}", userId, user.getId());
+        } else {
+            log.info("[auth] 手机号绑定成功 userId={} phone={}", userId, maskPhone(phone));
+        }
+        return vo;
     }
 
     // ==================== A6 查询当前手机号 ====================

@@ -25,15 +25,18 @@ public class MvcConfig implements WebMvcConfigurer {
                         "/users/login",
                         "/auth/refresh-token",
                         "/hi",
-                        // wx 域（小程序）免鉴权：图形码、发短信码、密码登录
+                        // wx 小程序免鉴权：图形码、发短信码、密码登录
                         // 注意：/users/auth/phone/bind 与 /users/auth/phone 必须登录，不得加入
                         "/users/auth/captcha",
                         "/users/auth/sms/code",
                         "/users/auth/login/password",
-                        // web 域（创作者后台）免鉴权：图形码、注册、登录
-                        // 注意：/web/auth/password/change 必须登录，不得加入
+                        // Web 创作者后台免鉴权：图形码、发短信码、注册、密码登录、短信登录
+                        // 注意：/web/auth/sms/code/set-password、/web/auth/password/set、
+                        //      /web/auth/password/change 必须登录，不得加入
                         "/web/auth/captcha",
+                        "/web/auth/sms/code",
                         "/web/auth/register",
-                        "/web/auth/login");
+                        "/web/auth/login",
+                        "/web/auth/login/sms");
     }
 }

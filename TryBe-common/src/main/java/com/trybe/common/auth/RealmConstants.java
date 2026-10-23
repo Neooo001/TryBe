@@ -3,14 +3,15 @@ package com.trybe.common.auth;
 /**
  * 账号域常量（双账号域拆分后引入）
  *
- * <p>TryBe 拆分为两个完全独立的账号域，同一 user_id 在不同域中代表不同的人：
+ * <p><b>账号体系 v3 起，realm 不再是「账号域」，而是「端 / 会话」</b>：
+ * 两端共用同一张 {@code app_user}、同一个 user_id，手机号是唯一身份锚点。
+ * realm 只剩一个作用 —— 防止 A 端的令牌打 B 端接口（跨端越权）。
  * <ul>
- *   <li>{@link #WX}：小程序域，账号表 {@code wx_user}，标识为微信 openid（手机号可选凭据）</li>
- *   <li>{@link #WEB}：Web 创作者后台域，账号表 {@code web_user}，标识为手机号</li>
+ *   <li>{@link #WX}：小程序端会话（微信 openid 为凭据，手机号必绑）</li>
+ *   <li>{@link #WEB}：创作者后台会话（手机号 + 短信码 / 密码为凭据）</li>
  * </ul>
  *
- * <p>域标识写入 JWT 的 {@link #CLAIM_REALM} claim，并由网关按路径校验，
- * 防止 A 域 token 访问 B 域接口（跨域 = 越权访问他人数据）。
+ * <p>域标识写入 JWT 的 {@link #CLAIM_REALM} claim，并由网关按路径校验。
  *
  * <p><b>为何放 common</b>：user-service（签发）与 TryBe-gateway（校验）是两份独立代码，
  * 必须引用同一个常量，否则 claim 名漂移会导致全站 401。

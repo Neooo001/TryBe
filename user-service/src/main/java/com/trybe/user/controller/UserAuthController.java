@@ -28,8 +28,8 @@ import javax.servlet.http.HttpServletRequest;
 /**
  * 小程序（wx 域）认证控制器 —— {@code /users/auth/**}
  *
- * <p><b>双账号域拆分后</b>：本控制器只服务小程序，表为 {@code wx_user}；
- * Web 创作者后台走 {@code /web/auth/**}（表 {@code web_user}），两端零交集。
+ * <p><b>账号体系 v3</b>：本控制器只服务小程序（{@code app_user} + 令牌 realm=wx）；
+ * Web 创作者后台走 {@code /web/auth/**}（同一张 {@code app_user}，令牌 realm=web）。
  * 短信验证码已<b>不再用于登录</b>（原 {@code /users/auth/login/sms} 已删除），
  * 仅用于「绑定手机号」与「设置密码」两个场景（见 {@code SmsScene}）。
  *

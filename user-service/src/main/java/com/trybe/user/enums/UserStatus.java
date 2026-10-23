@@ -8,6 +8,8 @@ import lombok.Getter;
 public enum UserStatus {
     FROZEN(0, "禁止使用"),
     NORMAL(1, "已激活"),
+    /** 已合并（该行已并入其他账号，仅留审计，不可登录） */
+    MERGED(2, "已合并"),
     ;
     @EnumValue
     int value;
@@ -24,6 +26,9 @@ public enum UserStatus {
         }
         if (value == 1) {
             return NORMAL;
+        }
+        if (value == 2) {
+            return MERGED;
         }
         throw new BadRequestException("账户状态错误");
     }

@@ -18,18 +18,18 @@ import java.util.List;
 @ApiModel(description = "创作者个人中心资料")
 public class CreatorProfileVO {
 
-    @ApiModelProperty("创作者用户ID（web域 web_user.id）")
+    @ApiModelProperty("创作者用户ID（app_user.id，与小程序用户同一套编号）")
     private Long creatorId;
 
     // ==================== 公开主页资料（可编辑） ====================
 
-    @ApiModelProperty("创作者昵称（公开主页展示名）")
+    @ApiModelProperty("昵称（取自 app_user.nickname，全端唯一：小程序 / 后台 / 圈子作品署名一致）")
     private String nickname;
 
-    @ApiModelProperty("头像 OSS objectKey（null=使用默认头像）")
+    @ApiModelProperty("头像 OSS objectKey（取自 app_user.avatar；null=使用默认头像）")
     private String avatarKey;
 
-    @ApiModelProperty("头像预签名访问 URL（null=使用默认头像，由前端渲染占位图）")
+    @ApiModelProperty("头像访问 URL（null=使用默认头像，由前端渲染占位图）")
     private String avatarUrl;
 
     @ApiModelProperty("主页封面图 OSS objectKey（null=使用默认封面）")
@@ -38,7 +38,7 @@ public class CreatorProfileVO {
     @ApiModelProperty("主页封面图预签名访问 URL（null=使用默认封面）")
     private String coverUrl;
 
-    @ApiModelProperty("个人简介（可为空）")
+    @ApiModelProperty("个人简介（取自 app_user.bio，与小程共同一份）")
     private String bio;
 
     @ApiModelProperty("已选创作方向编码列表（如 HAIR_COLOR,OUTFIT）")
@@ -49,7 +49,7 @@ public class CreatorProfileVO {
 
     // ==================== 账号资料（只读） ====================
 
-    @ApiModelProperty("账号资料（web_user 只读投影，不含密码哈希）")
+    @ApiModelProperty("账号资料（app_user 只读投影，不含密码哈希）")
     private AccountVO account;
 
     // ==================== 创作方向字典（可选项） ====================
@@ -61,7 +61,7 @@ public class CreatorProfileVO {
     private int fieldMax;
 
     /**
-     * 账号资料段（web_user 只读投影）
+     * 账号资料段（app_user 只读投影）
      */
     @Data
     @ApiModel(description = "创作者账号资料（只读）")
@@ -70,8 +70,17 @@ public class CreatorProfileVO {
         @ApiModelProperty("登录手机号（脱敏展示，如 138****8000；web域账号标识，不可修改）")
         private String phoneMasked;
 
-        @ApiModelProperty("账号昵称（注册昵称，与公开主页昵称相互独立，只读）")
+        @ApiModelProperty("账号昵称（即全端唯一昵称，只读；修改走 PUT /web/users/profile）")
         private String nickname;
+
+        @ApiModelProperty("头像 OSS objectKey（只读；修改走 PUT /web/users/profile）")
+        private String avatarKey;
+
+        @ApiModelProperty("头像访问 URL（只读）")
+        private String avatarUrl;
+
+        @ApiModelProperty("个人简介（只读）")
+        private String bio;
 
         @ApiModelProperty("账号创建时间")
         private LocalDateTime createTime;

@@ -11,10 +11,10 @@ import com.trybe.creator.domain.dto.CreatorProfileUpdateReq;
 import com.trybe.creator.domain.enums.CreatorField;
 import com.trybe.creator.domain.enums.HomepageStatus;
 import com.trybe.creator.domain.po.CreatorProfile;
-import com.trybe.creator.domain.po.WebUserBrief;
+import com.trybe.creator.domain.po.AccountBrief;
 import com.trybe.creator.domain.vo.CreatorProfileVO;
 import com.trybe.creator.mapper.CreatorProfileMapper;
-import com.trybe.creator.mapper.WebUserBriefMapper;
+import com.trybe.creator.mapper.AccountBriefMapper;
 import com.trybe.creator.service.ICreatorProfileService;
 import com.trybe.creator.util.CreatorOssPathBuilder;
 import lombok.RequiredArgsConstructor;
@@ -45,7 +45,7 @@ import java.util.function.BiPredicate;
  * <ul>
  *   <li>creatorId 一律由 Controller 从 UserContext 取入参，资料行按 uk_creator 唯一键定位，
  *       不存在「读他人资料」的入参面</li>
- *   <li>账号资料经 web_user 只读投影获取（不映射 password_hash），手机号脱敏后才出服务层</li>
+ *   <li>账号资料经 app_user 只读投影获取（不映射 password_hash），手机号脱敏后才出服务层</li>
  *   <li>头像/封面绑定强校验归档位（isProfileAvatar / isProfileCover），
  *       杜绝绑定他人对象或物品图等非个人中心用途对象</li>
  * </ul>
@@ -60,19 +60,19 @@ public class CreatorProfileServiceImpl extends ServiceImpl<CreatorProfileMapper,
 
     private static final String PHONE_MASK_REGEX = "(\\d{3})\\d{4}(\\d{4})";
     private static final String PHONE_MASK_REPLACEMENT = "$1****$2";
-    /** 懒创建默认行时的兜底昵称（web_user.nickname 非空，正常不会走到） */
+    /** 懒创建默认行时的兜底昵称（app_user.nickname 非空，正常不会走到） */
     private static final String DEFAULT_NICKNAME = "创作者";
 
-    private final WebUserBriefMapper webUserBriefMapper;
+    private final AccountBriefMapper accountBriefMapper;
     private final OssService ossService;
 
     // ==================== 获取个人中心资料 ====================
 
     @Override
     public CreatorProfileVO getMyProfile(Long creatorId) {
-        WebUserBrief webUser = requireWebUser(creatorId);
-        CreatorProfile profile = getOrCreateProfile(creatorId, webUser.getNickname());
-        return buildVO(profile, webUser);
+        AccountBrief account = requireAccount(creatorId);
+        CreatorProfile profile = getOrCreateProfile(creatorId, account.getNickname());
+        return buildVO(profile, account);
     }
 
     // ==================== 更新个人中心资料（白名单字段） ====================
@@ -80,33 +80,13 @@ public class CreatorProfileServiceImpl extends ServiceImpl<CreatorProfileMapper,
     @Override
     @Transactional
     public CreatorProfileVO updateMyProfile(Long creatorId, CreatorProfileUpdateReq req) {
-        WebUserBrief webUser = requireWebUser(creatorId);
-        CreatorProfile profile = getOrCreateProfile(creatorId, webUser.getNickname());
+        AccountBrief account = requireAccount(creatorId);
+        CreatorProfile profile = getOrCreateProfile(creatorId, account.getNickname());
 
-        // —— 昵称：必填，trim 后 1~32 字符（@NotBlank/@Size 之外的服务端兜底，防全空格绕过） ——
-        String nickname = StrUtil.trim(req.getNickname());
-        if (StrUtil.isBlank(nickname)) {
-            throw new BadRequestException("创作者昵称不能为空");
-        }
-        if (nickname.length() > 32) {
-            throw new BadRequestException("昵称不能超过32个字符");
-        }
-        profile.setNickname(nickname);
+        // 昵称 / 头像 / 简介 由 user-service 的 PUT /web/users/profile 维护（存 app_user），
+        // 本接口不再接受，DTO 提交即忽略。
 
-        // —— 简介：null=不修改；""=清空；非空=覆盖 ——
-        if (req.getBio() != null) {
-            String bio = StrUtil.trimToNull(req.getBio());
-            if (bio != null && bio.length() > 512) {
-                throw new BadRequestException("简介不能超过512个字符");
-            }
-            profile.setBio(bio);
-        }
-
-        // —— 头像/封面：null=不修改；""=恢复默认；非空=强校验本人归档位 ——
-        if (req.getAvatarKey() != null) {
-            profile.setAvatarKey(validateProfileImageKey(creatorId, req.getAvatarKey(),
-                    CreatorOssPathBuilder::isProfileAvatar, "头像"));
-        }
+        // —— 封面图：null=不修改；""=恢复默认；非空=强校验本人归档位 ——
         if (req.getCoverKey() != null) {
             profile.setCoverKey(validateProfileImageKey(creatorId, req.getCoverKey(),
                     CreatorOssPathBuilder::isProfileCover, "封面图"));
@@ -119,23 +99,23 @@ public class CreatorProfileServiceImpl extends ServiceImpl<CreatorProfileMapper,
 
         // homepageStatus / creatorId / 账号字段不在白名单：DTO 无绑定，提交即忽略
         updateById(profile);
-        log.info("[profile] 个人中心资料已更新 creatorId={} avatarBound={} coverBound={} fieldCodes={}",
-                creatorId, profile.getAvatarKey() != null, profile.getCoverKey() != null, profile.getFieldCodes());
-        return buildVO(profile, webUser);
+        log.info("[profile] 主页资料已更新 creatorId={} coverBound={} fieldCodes={}",
+                creatorId, profile.getCoverKey() != null, profile.getFieldCodes());
+        return buildVO(profile, account);
     }
 
     // ==================== 私有：档案定位与懒创建 ====================
 
     /**
-     * web_user 只读投影必须存在：创作者身份的事实来源是 web 域账号，
+     * app_user 只读投影必须存在：账号被删除/合并后不应再产生新的创作数据，
      * 行不存在说明账号已注销/归档，统一走 DATA_NOT_FOUND
      */
-    private WebUserBrief requireWebUser(Long creatorId) {
-        WebUserBrief webUser = webUserBriefMapper.selectById(creatorId);
-        if (webUser == null) {
+    private AccountBrief requireAccount(Long creatorId) {
+        AccountBrief account = accountBriefMapper.selectBriefById(creatorId);
+        if (account == null) {
             throw new BizIllegalException(ErrorCodeEnum.DATA_NOT_FOUND, "账号不存在或已注销");
         }
-        return webUser;
+        return account;
     }
 
     /**
@@ -210,24 +190,29 @@ public class CreatorProfileServiceImpl extends ServiceImpl<CreatorProfileMapper,
 
     // ==================== 私有：VO 组装 ====================
 
-    private CreatorProfileVO buildVO(CreatorProfile profile, WebUserBrief webUser) {
+    private CreatorProfileVO buildVO(CreatorProfile profile, AccountBrief accountBrief) {
         CreatorProfileVO vo = new CreatorProfileVO();
         vo.setCreatorId(profile.getCreatorId());
-        vo.setNickname(profile.getNickname());
-        vo.setAvatarKey(profile.getAvatarKey());
+        // 昵称 / 头像 / 简介 一律取 app_user（唯一资料源），creator_profile 同名列已冻结
+        vo.setNickname(accountBrief.getNickname());
+        vo.setAvatarKey(accountBrief.getAvatar());
+        vo.setAvatarUrl(accessUrlOrNull(accountBrief.getAvatar(), versionOf(accountBrief.getUpdateTime())));
+        vo.setBio(accountBrief.getBio());
+        // 封面图仍是创作者主页专属，存 creator_profile
         Long version = versionOf(profile.getUpdateTime());
-        vo.setAvatarUrl(accessUrlOrNull(profile.getAvatarKey(), version));
         vo.setCoverKey(profile.getCoverKey());
         vo.setCoverUrl(accessUrlOrNull(profile.getCoverKey(), version));
-        vo.setBio(profile.getBio());
         vo.setFieldCodes(splitFieldCodes(profile.getFieldCodes()));
         vo.setHomepageStatus(profile.getHomepageStatus());
 
         CreatorProfileVO.AccountVO account = new CreatorProfileVO.AccountVO();
-        account.setPhoneMasked(maskPhone(webUser.getPhone()));
-        account.setNickname(webUser.getNickname());
-        account.setCreateTime(webUser.getCreateTime());
-        account.setLastLoginTime(webUser.getLastLoginTime());
+        account.setPhoneMasked(maskPhone(accountBrief.getPhone()));
+        account.setNickname(accountBrief.getNickname());
+        account.setAvatarKey(accountBrief.getAvatar());
+        account.setAvatarUrl(accessUrlOrNull(accountBrief.getAvatar(), versionOf(accountBrief.getUpdateTime())));
+        account.setBio(accountBrief.getBio());
+        account.setCreateTime(accountBrief.getCreateTime());
+        account.setLastLoginTime(accountBrief.getLastLoginTime());
         vo.setAccount(account);
 
         List<CreatorProfileVO.FieldOptionVO> options = new ArrayList<>();

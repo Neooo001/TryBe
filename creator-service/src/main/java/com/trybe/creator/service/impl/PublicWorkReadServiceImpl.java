@@ -15,11 +15,12 @@ import com.trybe.common.utils.CollUtils;
 import com.trybe.creator.domain.enums.CreatorItemStatus;
 import com.trybe.creator.domain.enums.WorkZone;
 import com.trybe.creator.domain.po.CreatorItem;
+import com.trybe.creator.domain.po.AccountBrief;
+import com.trybe.creator.domain.po.CreatorItem;
 import com.trybe.creator.domain.po.CreatorItemModelImage;
-import com.trybe.creator.domain.po.CreatorProfile;
+import com.trybe.creator.mapper.AccountBriefMapper;
 import com.trybe.creator.mapper.CreatorItemMapper;
 import com.trybe.creator.mapper.CreatorItemModelImageMapper;
-import com.trybe.creator.mapper.CreatorProfileMapper;
 import com.trybe.creator.service.IPublicWorkReadService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -55,14 +56,22 @@ import java.time.ZoneId;
 @RequiredArgsConstructor
 public class PublicWorkReadServiceImpl implements IPublicWorkReadService {
 
-    /** C 端封面/头像预签名有效期（秒）：够小程序渲染与本地缓存，又不至于长期外泄 */
-    private static final long COVER_URL_EXPIRE_SECONDS = 3600L;
+    /**
+     * 作品图签名 URL 有效期（秒）
+     *
+     * <p>作品图存<b>私有桶</b>，只能靠短时签名访问（与抖音同款思路：私有存储 + 带时效的
+     * 签名 URL，而不是把桶设成公共读 —— 公共读一旦桶策略允许 List，等于把整桶可枚举）。
+     *
+     * <p><b>URL 绝不落库、也不允许前端持久化</b>：DB 只存 objectKey，URL 每次响应现算。
+     * 前端缓存「数据」可以，缓存「URL」不行 —— 这是 1 小时图裂的唯一成因。
+     */
+    private static final long WORK_IMAGE_TTL_SECONDS = 3600L;
 
     /** 创作者未建档案时的兜底昵称 */
     private static final String DEFAULT_CREATOR_NICKNAME = "TryBe创作者";
 
     private final CreatorItemMapper creatorItemMapper;
-    private final CreatorProfileMapper creatorProfileMapper;
+    private final AccountBriefMapper accountBriefMapper;
     private final CreatorItemModelImageMapper creatorItemModelImageMapper;
     private final OssService ossService;
 
@@ -96,9 +105,9 @@ public class PublicWorkReadServiceImpl implements IPublicWorkReadService {
             return PageDTO.empty(page);
         }
 
-        Map<Long, CreatorProfile> profileMap = loadProfiles(page.getRecords());
+        Map<Long, AccountBrief> accountMap = loadAccounts(page.getRecords());
         List<WorkBriefDTO> list = page.getRecords().stream()
-                .map(item -> toBriefDTO(item, profileMap.get(item.getCreatorId())))
+                .map(item -> toBriefDTO(item, accountMap.get(item.getCreatorId())))
                 .collect(Collectors.toList());
         return PageDTO.of(page, list);
     }
@@ -114,7 +123,7 @@ public class PublicWorkReadServiceImpl implements IPublicWorkReadService {
         if (item == null) {
             return null;
         }
-        CreatorProfile profile = loadProfile(item.getCreatorId());
+        AccountBrief account = accountBriefMapper.selectBriefById(item.getCreatorId());
 
         WorkDetailDTO dto = new WorkDetailDTO();
         dto.setId(item.getId());
@@ -122,7 +131,7 @@ public class PublicWorkReadServiceImpl implements IPublicWorkReadService {
         dto.setTitle(item.getTitle());
         dto.setDescription(item.getDescription());
         dto.setZone(item.getZone());
-        dto.setImageUrl(presign(item.getImageKey()));
+        dto.setImageUrl(workImageUrl(item.getImageKey()));
         dto.setImages(buildDetailImages(item));
         dto.setTags(parseJsonList(item.getPatternTags()));
         dto.setSeasons(parseJsonList(item.getSeasons()));
@@ -130,10 +139,10 @@ public class PublicWorkReadServiceImpl implements IPublicWorkReadService {
         dto.setTopics(parseJsonList(item.getTopics()));
         dto.setMaterial(item.getMaterial());
         dto.setCreatorId(item.getCreatorId());
-        dto.setCreatorNickname(profile == null || StrUtil.isBlank(profile.getNickname())
-                ? DEFAULT_CREATOR_NICKNAME : profile.getNickname());
-        dto.setCreatorAvatarUrl(avatarAccessUrl(profile));
-        dto.setCreatorBio(profile == null ? null : profile.getBio());
+        dto.setCreatorNickname(account == null || StrUtil.isBlank(account.getNickname())
+                ? DEFAULT_CREATOR_NICKNAME : account.getNickname());
+        dto.setCreatorAvatarUrl(avatarAccessUrl(account));
+        dto.setCreatorBio(account == null ? null : account.getBio());
         dto.setPublishTime(item.getCreateTime());
         return dto;
     }
@@ -148,7 +157,7 @@ public class PublicWorkReadServiceImpl implements IPublicWorkReadService {
     /**
      * 批量取创作者公开档案（一次 in 查询，避免 N+1）
      */
-    private Map<Long, CreatorProfile> loadProfiles(List<CreatorItem> items) {
+    private Map<Long, AccountBrief> loadAccounts(List<CreatorItem> items) {
         Set<Long> creatorIds = items.stream()
                 .map(CreatorItem::getCreatorId)
                 .filter(Objects::nonNull)
@@ -156,29 +165,13 @@ public class PublicWorkReadServiceImpl implements IPublicWorkReadService {
         if (CollUtils.isEmpty(creatorIds)) {
             return Collections.emptyMap();
         }
-        List<CreatorProfile> profiles = creatorProfileMapper.selectList(
-                new LambdaQueryWrapper<CreatorProfile>().in(CreatorProfile::getCreatorId, creatorIds));
-        if (CollUtils.isEmpty(profiles)) {
+        List<AccountBrief> accounts = accountBriefMapper.selectBriefByIds(creatorIds);
+        if (CollUtils.isEmpty(accounts)) {
             return Collections.emptyMap();
         }
-        return profiles.stream()
-                .filter(p -> p.getCreatorId() != null)
-                .collect(Collectors.toMap(CreatorProfile::getCreatorId, Function.identity(), (a, b) -> a));
-    }
-
-    /**
-     * 单个创作者档案（详情页只要一个人，没必要走批量 in 查询）
-     *
-     * <p>用 selectList + 取首条而不是 selectOne：creator_profile 理论上 1:1，
-     * 但历史脏数据一旦出现重复行，selectOne 会直接抛 TooManyResults 把详情页打死。
-     */
-    private CreatorProfile loadProfile(Long creatorId) {
-        if (creatorId == null) {
-            return null;
-        }
-        List<CreatorProfile> profiles = creatorProfileMapper.selectList(
-                new LambdaQueryWrapper<CreatorProfile>().eq(CreatorProfile::getCreatorId, creatorId));
-        return CollUtils.isEmpty(profiles) ? null : profiles.get(0);
+        return accounts.stream()
+                .filter(a -> a.getId() != null)
+                .collect(Collectors.toMap(AccountBrief::getId, Function.identity(), (a, b) -> a));
     }
 
     /**
@@ -196,13 +189,13 @@ public class PublicWorkReadServiceImpl implements IPublicWorkReadService {
                         .orderByAsc(CreatorItemModelImage::getId));
         if (!CollUtils.isEmpty(modelImages)) {
             for (CreatorItemModelImage image : modelImages) {
-                String url = presign(image.getImageKey());
+                String url = workImageUrl(image.getImageKey());
                 if (StrUtil.isNotBlank(url)) {
                     urls.add(url);
                 }
             }
         }
-        String cover = presign(item.getImageKey());
+        String cover = workImageUrl(item.getImageKey());
         if (StrUtil.isNotBlank(cover)) {
             urls.remove(cover);
             urls.add(0, cover);
@@ -210,21 +203,21 @@ public class PublicWorkReadServiceImpl implements IPublicWorkReadService {
         return urls;
     }
 
-    private WorkBriefDTO toBriefDTO(CreatorItem item, CreatorProfile profile) {
+    private WorkBriefDTO toBriefDTO(CreatorItem item, AccountBrief account) {
         WorkBriefDTO dto = new WorkBriefDTO();
         dto.setId(item.getId());
         dto.setItemNo(item.getItemNo());
         dto.setTitle(item.getTitle());
         dto.setDescription(item.getDescription());
         dto.setZone(item.getZone());
-        dto.setImageUrl(presign(item.getImageKey()));
+        dto.setImageUrl(workImageUrl(item.getImageKey()));
         dto.setTags(parseJsonList(item.getPatternTags()));
         dto.setSeasons(parseJsonList(item.getSeasons()));
         dto.setStyles(parseJsonList(item.getStyles()));
         dto.setCreatorId(item.getCreatorId());
-        dto.setCreatorNickname(profile == null || StrUtil.isBlank(profile.getNickname())
-                ? DEFAULT_CREATOR_NICKNAME : profile.getNickname());
-        dto.setCreatorAvatarUrl(avatarAccessUrl(profile));
+        dto.setCreatorNickname(account == null || StrUtil.isBlank(account.getNickname())
+                ? DEFAULT_CREATOR_NICKNAME : account.getNickname());
+        dto.setCreatorAvatarUrl(avatarAccessUrl(account));
         dto.setPublishTime(item.getCreateTime());
         return dto;
     }
@@ -244,20 +237,31 @@ public class PublicWorkReadServiceImpl implements IPublicWorkReadService {
         }
     }
 
-    private String presign(String objectKey) {
+    /**
+     * 作品图访问 URL（私有桶 + 短时签名）
+     *
+     * <p>唯一的 URL 生成入口：详情图集、列表封面都走这里，禁止在别处手写 presign，
+     * 否则 TTL 与降级策略会分叉。
+     *
+     * @param objectKey OSS objectKey（DB 里持久化的事实）
+     * @return 签名 URL；key 为空或签名失败返回 null（前端渲染占位图）
+     */
+    private String workImageUrl(String objectKey) {
         if (StrUtil.isBlank(objectKey)) {
             return null;
         }
         try {
-            return ossService.generatePresignedUrl(objectKey, COVER_URL_EXPIRE_SECONDS);
+            return ossService.generatePresignedUrl(objectKey, WORK_IMAGE_TTL_SECONDS);
         } catch (Exception e) {
-            log.warn("[public-work] 生成预签名URL失败，降级为 null objectKey={}", objectKey, e);
+            log.warn("[public-work] 生成作品图URL失败，降级为 null objectKey={}", objectKey, e);
             return null;
         }
     }
 
     /**
      * 创作者头像访问 URL
+     *
+     * <p>头像统一存在 {@code app_user.avatar}（账号体系 v3），小程序与后台共用同一份。
      *
      * <p><b>头像归档在第二 bucket（{@code trybe-avatar}，公共读），必须用与上传一致的
      * bucket 取 URL</b>：上传侧 {@code UploadService} 与创作者后台
@@ -269,16 +273,16 @@ public class PublicWorkReadServiceImpl implements IPublicWorkReadService {
      * （无签名、不过期），私有桶才回落预签名；版本号取 {@code update_time} 毫秒
      * （换图后才会变），用于打破小程序侧图片缓存。
      */
-    private String avatarAccessUrl(CreatorProfile profile) {
-        if (profile == null || StrUtil.isBlank(profile.getAvatarKey())) {
+    private String avatarAccessUrl(AccountBrief account) {
+        if (account == null || StrUtil.isBlank(account.getAvatar())) {
             return null;
         }
         try {
-            Long version = profile.getUpdateTime() == null ? null
-                    : profile.getUpdateTime().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
-            return ossService.accessUrl(ossService.secondBucketName(), profile.getAvatarKey(), version);
+            Long version = account.getUpdateTime() == null ? null
+                    : account.getUpdateTime().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+            return ossService.accessUrl(ossService.secondBucketName(), account.getAvatar(), version);
         } catch (Exception e) {
-            log.warn("[public-work] 生成头像访问URL失败，降级为 null avatarKey={}", profile.getAvatarKey(), e);
+            log.warn("[public-work] 生成头像访问URL失败，降级为 null avatarKey={}", account.getAvatar(), e);
             return null;
         }
     }

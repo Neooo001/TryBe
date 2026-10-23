@@ -51,7 +51,7 @@ public class CreatorItem implements Serializable {
     /** 物品业务编号，如 CI20250101000001（全局唯一） */
     private String itemNo;
 
-    /** 创作者用户ID（web_user.id） */
+    /** 创作者用户ID（app_user.id） */
     private Long creatorId;
 
     /** 【创作者】一级分类：TOP/BOTTOM/SET/SHOES/BAG/ACCESSORY/DECOR/OTHER */

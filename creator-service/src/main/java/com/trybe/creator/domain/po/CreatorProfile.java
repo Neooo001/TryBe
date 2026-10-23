@@ -11,7 +11,7 @@ import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
- * 创作者个人主页档案表（{@code creator_profile}，与 {@code web_user} 1:1）
+ * 创作者个人主页档案表（{@code creator_profile}，与 {@code app_user} 1:1）
  *
  * <p>字段分两段：
  * <ol>
@@ -20,9 +20,9 @@ import java.time.LocalDateTime;
  * </ol>
  *
  * <p>账号资料（手机号/账号昵称/创建时间/最近登录时间）<b>不在本表</b>：
- * 由 {@code WebUserBrief} 对 {@code web_user} 做只读投影获取，避免双写漂移。
+ * 由 {@code AccountBrief} 对 {@code app_user} 做只读投影获取，避免双写漂移。
  *
- * <p>行记录懒创建：首次 {@code GET /creator/profile} 时按 web_user.nickname 兜底插入默认行。
+ * <p>行记录懒创建：首次 {@code GET /creator/profile} 时按 app_user.nickname 兜底插入默认行。
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
@@ -35,7 +35,7 @@ public class CreatorProfile implements Serializable {
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
 
-    /** 创作者用户ID（web_user.id，web域；与 wx_user 零关联） */
+    /** 创作者用户ID（app_user.id，与小程序用户同一套编号） */
     private Long creatorId;
 
     /** 创作者昵称（公开主页展示名） */

@@ -27,6 +27,12 @@ public class UserLoginVO {
     /** 手机号归属状态：0从未绑定 1已绑定 2曾绑定被释放（小程序据此区分硬拦截/软提示） */
     private PhoneState phoneState;
 
+    /** 是否需要绑定手机号（= phoneState 为 NEVER_BOUND；小程序据此强制跳绑号页） */
+    private boolean needBindPhone;
+
+    /** 是否已设置密码（false 时小程序进入首页后引导设置密码） */
+    private boolean hasPassword;
+
     // ===== 双 Token =====
     /** JWT AccessToken（30min 有效） */
     private String accessToken;

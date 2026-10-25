@@ -8,11 +8,13 @@ import com.trybe.common.ai.GarmentRecognizeResult;
 import com.trybe.common.ai.GarmentRecognizeService;
 import com.trybe.common.service.OssService;
 import com.trybe.common.utils.FileTypeUtils;
+import com.trybe.wardrobe.domain.enums.GarmentCategoryL1;
 import com.trybe.wardrobe.domain.enums.ImportTaskStatus;
 import com.trybe.wardrobe.domain.po.WardrobeImportTask;
 import com.trybe.wardrobe.mapper.WardrobeImportTaskMapper;
 import com.trybe.wardrobe.service.ai.GarmentImageCropService;
 import com.trybe.wardrobe.service.ai.GarmentMattingService;
+import com.trybe.wardrobe.service.ai.MattingHint;
 import com.trybe.wardrobe.util.WardrobeOssPathBuilder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,7 +34,7 @@ import java.time.LocalDateTime;
  * 2. 标记 PROCESSING + startTime
  * 3. 从 OSS 拉原图 → 必要时压缩
  * 4. 调用视觉大模型 → 结构化属性 + 主体框 bbox
- * 5. 先试「像素级抠图」，不行退回「bbox 矩形裁剪」，都不行用原图；产物只写 task.cutout_object_key
+ * 5. 先试「像素级抠图（透明底 PNG）」，不行退回「bbox 矩形裁剪」，都不行用原图；产物只写 task.cutout_object_key
  * 6. 任务置 SUCCESS/FAILED，回填 aiResultJson / cutoutObjectKey / costMs
  * </pre>
  *
@@ -124,7 +126,7 @@ public class WardrobeImportProcessor {
             }
 
             // ========== 3. 抠图 → 裁剪 → 原图（三级降级） ==========
-            String cutoutKey = tryMatting(task);
+            String cutoutKey = tryMatting(task, result);
             if (cutoutKey == null) {
                 cutoutKey = tryCropAndUpload(task, originBytes, result);
             }
@@ -183,24 +185,48 @@ public class WardrobeImportProcessor {
     }
 
     /**
-     * 尝试像素级抠图（去背景 → 白底）
+     * 尝试像素级抠图（去背景 → 透明底）
      *
      * <p>失败一律静默降级：抠图只是「锦上添花」，任何异常都不能让导入失败。
      *
+     * <p><b>为什么要传识别结果</b>：抠图指令里必须点名「只保留这件<品类>」，不点名的话
+     * 模特身上的上衣 + 裤子 + 鞋会被一起保留。这里用 AI 识别出的二级品类（如「长裤」）作为提示，
+     * 让「导入一条长裤」的封面里不再出现模特脚上的鞋。
+     *
+     * @param result AI 识别结果，可为 null（识别失败时退化为「最主要的服装」）
      * @return 抠图结果的 objectKey；未启用/失败返回 null
      */
-    private String tryMatting(WardrobeImportTask task) {
+    private String tryMatting(WardrobeImportTask task, GarmentRecognizeResult result) {
         GarmentMattingService mattingService = mattingServiceProvider.getIfAvailable();
         if (mattingService == null) {
             // 未启用抠图：不是错误，不打 warn，避免正常流程刷屏
             return null;
         }
         try {
-            return mattingService.matting(task.getOriginObjectKey(), task.getUserId(), task.getTaskNo());
+            MattingHint hint = MattingHint.of(subjectOf(result), result == null ? null : result.getBbox());
+            return mattingService.matting(task.getOriginObjectKey(), task.getUserId(), task.getTaskNo(), hint);
         } catch (Exception e) {
             log.warn("[WardrobeImportProcessor] 抠图失败，降级本地裁剪 taskId={} err={}", task.getId(), e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * 取「要保留的服饰」中文名，供抠图指令点名
+     *
+     * <p>优先用 AI 归纳的二级品类（长裤/连衣裙/外套…，最贴近用户认知）；
+     * 二级缺失时退回一级分类中文名；连一级都判不出来（OTHER）就返回 null，
+     * 让抠图退化为「只保留最主要的服装」——不要拿「未分类」去污染提示词。
+     */
+    private String subjectOf(GarmentRecognizeResult result) {
+        if (result == null) {
+            return null;
+        }
+        if (StrUtil.isNotBlank(result.getCategoryL2())) {
+            return result.getCategoryL2().trim();
+        }
+        GarmentCategoryL1 l1 = GarmentCategoryL1.of(result.getCategoryL1());
+        return l1 == GarmentCategoryL1.OTHER ? null : l1.getDesc();
     }
 
     /**

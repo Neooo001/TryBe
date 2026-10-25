@@ -1,5 +1,6 @@
 package com.trybe.api.client;
 
+import com.trybe.api.dto.MyWorkBriefDTO;
 import com.trybe.api.dto.PageResult;
 import com.trybe.api.dto.WorkBriefDTO;
 import com.trybe.api.dto.WorkDetailDTO;
@@ -9,6 +10,8 @@ import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.cloud.openfeign.SpringQueryMap;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 
 import java.util.List;
 
@@ -49,4 +52,37 @@ public interface CreatorClient {
      */
     @GetMapping("/works/zones")
     R<List<String>> listZones();
+
+    // ==================== 小程序「我的作品」（本人看 + 上下架） ====================
+
+    /**
+     * 分页查询「我」的作品（仅已上架 / 已下架，草稿不出现在 C 端）
+     *
+     * <p><b>为什么不复用 {@link #pagePublicWorks}</b>：那是「任意人的已上架作品」，
+     * 按发布时间排序、带创作者资料；这里是「我自己的、含已下架」，按创建时间倒序。
+     * 两个口径混用会让「为什么我下架的作品在圈子里还能看到」变成必然。
+     *
+     * <p>身份不在这里传：{@code DefaultFeignConfig} 的拦截器会把当前 UserContext 的
+     * userId 写进 {@code user-info} 头，creator-service 侧用 {@code UserContext.requireUser()} 取回。
+     *
+     * @param status   ON_SHELF / OFF_SHELF（由 content-service 做过白名单校验）
+     * @param pageNo   页码，从 1 开始
+     * @param pageSize 每页数量
+     */
+    @GetMapping("/my-works")
+    R<PageResult<MyWorkBriefDTO>> pageMyWorks(@RequestParam("status") String status,
+                                             @RequestParam("pageNo") Integer pageNo,
+                                             @RequestParam("pageSize") Integer pageSize);
+
+    /**
+     * 上架我的作品（OFF_SHELF → ON_SHELF）
+     */
+    @PostMapping("/my-works/{id}/on-shelf")
+    R<Void> onShelfMyWork(@PathVariable("id") Long id);
+
+    /**
+     * 下架我的作品（ON_SHELF → OFF_SHELF）
+     */
+    @PostMapping("/my-works/{id}/off-shelf")
+    R<Void> offShelfMyWork(@PathVariable("id") Long id);
 }

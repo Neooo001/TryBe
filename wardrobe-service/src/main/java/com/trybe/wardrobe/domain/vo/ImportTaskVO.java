@@ -22,7 +22,7 @@ public class ImportTaskVO implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    /** 抠图模式：像素级抠图（白底留图） */
+    /** 抠图模式：像素级抠图（白底留图，只留衣服） */
     public static final String CUTOUT_MODE_MATTING = "MATTING";
     /** 抠图模式：本地 bbox 矩形裁剪 */
     public static final String CUTOUT_MODE_CROP = "CROP";
